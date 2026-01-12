@@ -4,7 +4,10 @@ import os
 import numpy as np
 from tqdm import tqdm
 import itertools
-import torch
+try:
+    import torch
+except ImportError:
+    torch = None
 from sklearn.metrics import f1_score
 from collections import deque
 from sklearn.preprocessing import MultiLabelBinarizer

@@ -6,145 +6,25 @@ from collections import deque
 from contextlib import redirect_stdout
 import argparse
 from tqdm import tqdm
+import sys
+import io
+
+# Windowsのコンソール出力のエンコーディング問題を回避
+if sys.platform == 'win32' and hasattr(sys.stdout, 'buffer'):
+    try:
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    except (AttributeError, ValueError):
+        pass  # 既に設定されているか、設定できない場合はスキップ
 
 from model_definitions import initializeLLM, promptLLM, constructPrompt
 from prompts import (multi_dim_prompt, NodeListSchema, type_cls_system_instruction, type_cls_main_prompt, TypeClsSchema,
                      business_type_cls_system_instruction, business_type_cls_main_prompt, BusinessTypeClsSchema)
 from taxonomy import Node, DAG
-from datasets import load_dataset
 from expansion import expandNodeWidth, expandNodeDepth
 from paper import Paper
 from utils import clean_json_string
+from tools.markdown_utils import extract_metadata_from_markdown
 
-def extract_company_name(content):
-    """Markdownファイルから会社名を抽出"""
-    # パターン1: 「### 会社名」形式（基本情報セクション内）
-    pattern1 = r'###\s+([^#\n]+(?:株式会社|有限会社|合資会社|合名会社|合同会社|一般社団法人|財団法人|協同組合|組合)[^\n]*)'
-    match1 = re.search(pattern1, content)
-    if match1:
-        company_name = match1.group(1).strip()
-        # 「様」を除去
-        company_name = company_name.replace('様', '').strip()
-        return company_name
-    
-    # パターン2: 「会社名様」形式（タイトルの直後）
-    pattern2 = r'^#\s+[^\n]+\n+\n+([^#\n]+(?:株式会社|有限会社|合資会社|合名会社|合同会社|一般社団法人|財団法人|協同組合|組合)[^\n]*様?)'
-    match2 = re.search(pattern2, content, re.MULTILINE)
-    if match2:
-        company_name = match2.group(1).strip()
-        company_name = company_name.replace('様', '').strip()
-        return company_name
-    
-    return None
-
-def extract_metadata_from_markdown(content):
-    """MarkdownファイルのYAMLフロントマターからメタデータを抽出"""
-    # YAMLフロントマターのパターン（---で囲まれた部分）
-    frontmatter_pattern = r'^---\s*\n(.*?)\n---\s*\n'
-    frontmatter_match = re.search(frontmatter_pattern, content, re.DOTALL | re.MULTILINE)
-    
-    if not frontmatter_match:
-        return None
-    
-    frontmatter_text = frontmatter_match.group(1)
-    metadata = {}
-    
-    # YAML形式のパース（簡易版）
-    for line in frontmatter_text.split('\n'):
-        line = line.strip()
-        if not line or line.startswith('#'):
-            continue
-        
-        # key: value 形式をパース
-        if ':' in line:
-            key, value = line.split(':', 1)
-            key = key.strip()
-            value = value.strip()
-            # クォートを除去
-            value = value.strip('"\'')
-            metadata[key] = value
-    
-    return metadata if metadata else None
-
-def extract_company_info_from_markdown(content, company_name):
-    """Markdownファイルから会社情報を抽出（YAMLフロントマター優先、基本情報セクションはフォールバック）"""
-    if not company_name:
-        return None
-    
-    # まずYAMLフロントマターから抽出を試みる
-    metadata = extract_metadata_from_markdown(content)
-    if metadata:
-        company_info = {}
-        if 'company_industry' in metadata or 'industry' in metadata:
-            company_info['industry'] = metadata.get('company_industry') or metadata.get('industry')
-        if 'company_revenue_size' in metadata or 'revenue_size' in metadata:
-            company_info['revenue_size'] = metadata.get('company_revenue_size') or metadata.get('revenue_size')
-        
-        if company_info.get('industry') or company_info.get('revenue_size'):
-            return company_info
-    
-    # フロントマターに情報がない場合は、基本情報セクションから抽出（フォールバック）
-    basic_info_pattern = r'##\s+基本情報\s+(.*?)(?=##|\Z)'
-    basic_info_match = re.search(basic_info_pattern, content, re.DOTALL)
-    
-    if not basic_info_match:
-        return None
-    
-    basic_info_section = basic_info_match.group(1)
-    
-    # 会社名のセクションを抽出
-    company_section_pattern = rf'###\s+{re.escape(company_name)}.*?(?=###|\Z)'
-    company_section_match = re.search(company_section_pattern, basic_info_section, re.DOTALL)
-    
-    if not company_section_match:
-        return None
-    
-    company_section = company_section_match.group(0)
-    
-    # 業種を抽出
-    industry_pattern = r'業種[：:]\s*([^\n]+)'
-    industry_match = re.search(industry_pattern, company_section)
-    industry = industry_match.group(1).strip() if industry_match else None
-    
-    # 売上規模を抽出
-    revenue_pattern = r'売上規模[：:]\s*([^\n]+)'
-    revenue_match = re.search(revenue_pattern, company_section)
-    revenue_size = revenue_match.group(1).strip() if revenue_match else None
-    
-    if industry or revenue_size:
-        return {
-            'industry': industry,
-            'revenue_size': revenue_size
-        }
-    
-    return None
-
-def investigate_company_info(company_name, manual_info_file='datasets/casestudy/company_info.json'):
-    """手動入力ファイルから会社の業種と売上規模を読み込む"""
-    import json
-    
-    # 手動入力ファイルを読み込み
-    if os.path.exists(manual_info_file):
-        try:
-            with open(manual_info_file, 'r', encoding='utf-8') as f:
-                manual_info = json.load(f)
-            
-            # 会社名で検索（完全一致または部分一致）
-            if company_name in manual_info:
-                return manual_info[company_name]
-            
-            # 部分一致で検索（「株式会社」などの表記揺れに対応）
-            for key, value in manual_info.items():
-                if company_name in key or key in company_name:
-                    return value
-        except Exception as e:
-            print(f"Warning: Failed to load company info file: {e}")
-    
-    # 見つからない場合はNoneを返す
-    return {
-        'industry': None,
-        'revenue_size': None
-    }
 
 def construct_dataset(args):
     if not os.path.exists(args.data_dir):
@@ -182,43 +62,35 @@ def construct_dataset(args):
                     # 本文（abstract相当）は全内容を使用
                     abstract = content
                     
-                    # 会社名を抽出
-                    company_name = extract_company_name(content)
+                    # 会社名を抽出（YAMLフロントマターからのみ、必須）
+                    metadata = extract_metadata_from_markdown(content)
+                    if not metadata:
+                        raise ValueError(f"エラー: {md_file} にYAMLフロントマターがありません。YAMLフロントマターを追加してください。")
                     
-                    # 会社情報を抽出（Markdownファイルから優先、なければ手動入力ファイルから）
-                    company_info = None
-                    if company_name:
-                        # まずMarkdownファイルから抽出を試みる
-                        company_info = extract_company_info_from_markdown(content, company_name)
-                        
-                        # Markdownファイルに情報がない場合は、手動入力ファイルから読み込む
-                        if not company_info or (not company_info.get('industry') and not company_info.get('revenue_size')):
-                            manual_info = investigate_company_info(company_name, 
-                                                                   manual_info_file=os.path.join(args.data_dir, 'company_info.json'))
-                            # 手動入力ファイルの情報で上書き（Markdownの情報があれば優先）
-                            if manual_info:
-                                if not company_info:
-                                    company_info = {}
-                                if not company_info.get('industry') and manual_info.get('industry'):
-                                    company_info['industry'] = manual_info['industry']
-                                if not company_info.get('revenue_size') and manual_info.get('revenue_size'):
-                                    company_info['revenue_size'] = manual_info['revenue_size']
-                        
-                        if company_info:
-                            company_info_cache[company_name] = company_info
+                    company_name = metadata.get('company_name')
+                    if not company_name:
+                        raise ValueError(f"エラー: {md_file} のYAMLフロントマターに 'company_name' が設定されていません。")
+                    
+                    # 会社情報を抽出（YAMLフロントマターからのみ）
+                    company_info = {}
+                    if metadata.get('company_industry'):
+                        company_info['industry'] = metadata['company_industry']
+                    if metadata.get('company_revenue_size'):
+                        company_info['revenue_size'] = metadata['company_revenue_size']
+                    
+                    if company_info:
+                        company_info_cache[company_name] = company_info
                     
                     # Paperオブジェクトを作成
                     paper = Paper(id, title, abstract, label_opts=args.dimensions, internal=True)
-                    if company_info:
-                        paper.company_name = company_name
-                        paper.company_industry = company_info.get('industry')
-                        paper.company_revenue_size = company_info.get('revenue_size')
+                    paper.company_name = company_name
+                    paper.company_industry = company_info.get('industry')
+                    paper.company_revenue_size = company_info.get('revenue_size')
                     
-                    temp_dict = {"Title": title, "Abstract": abstract}
-                    if company_name:
-                        temp_dict["Company"] = company_name
-                    if company_info:
+                    temp_dict = {"Title": title, "Abstract": abstract, "Company": company_name}
+                    if company_info.get('industry'):
                         temp_dict["Industry"] = company_info.get('industry')
+                    if company_info.get('revenue_size'):
                         temp_dict["RevenueSize"] = company_info.get('revenue_size')
                     
                     formatted_dict = json.dumps(temp_dict, ensure_ascii=False)
@@ -277,7 +149,7 @@ def construct_dataset(args):
     
     internal_collection = {}
 
-    with open(os.path.join(args.data_dir, 'internal.txt'), 'w') as i:
+    with open(os.path.join(args.data_dir, 'internal.txt'), 'w', encoding='utf-8') as i:
         internal_count = 0
         id = 0
         for p in tqdm(ds[split]):
@@ -369,13 +241,13 @@ def main(args):
     roots, id2node, label2node = initialize_DAG(args)
 
     for dim in args.dimensions:
-        with open(f'{args.data_dir}/initial_taxo_{dim}.txt', 'w') as f:
+        with open(f'{args.data_dir}/initial_taxo_{dim}.txt', 'w', encoding='utf-8') as f:
             with redirect_stdout(f):
                 roots[dim].display(0, indent_multiplier=5)
 
     print("######## STEP 3: CLASSIFY PAPERS BY DIMENSION (TASK, METHOD, DATASET, EVAL, APPLICATION, etc.) ########")
 
-    args.llm = 'vllm'
+    # args.llm = 'vllm'  # GPTを使用する場合はコメントアウト
     dags = {dim:DAG(root=root, dim=dim) for dim, root in roots.items()}
 
     # do for internal collection
@@ -441,14 +313,14 @@ def main(args):
         else:
             # no children -> perform depth expansion
             new_children, success = expandNodeDepth(args, curr_node, id2node, label2node)
-            args.llm = 'vllm'
+            # args.llm = 'vllm'  # GPTを使用する場合はコメントアウト
             print(f'(DEPTH EXPANSION) new {len(new_children)} children for {curr_node.label} ({curr_node.dimension}) are: {str((new_children))}')
             if (len(new_children) > 0) and success:
                 queue.append(curr_node)
     
     print("######## STEP 5: SAVE THE TAXONOMY ########")
     for dim in args.dimensions:
-        with open(f'{args.data_dir}/final_taxo_{dim}.txt', 'w') as f:
+        with open(f'{args.data_dir}/final_taxo_{dim}.txt', 'w', encoding='utf-8') as f:
             with redirect_stdout(f):
                 taxo_dict = roots[dim].display(0, indent_multiplier=5)
 
@@ -462,10 +334,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--topic', type=str, default='ビジネスソリューション導入事例')
     parser.add_argument('--dataset', type=str, default='casestudy')
-    parser.add_argument('--llm', type=str, default='gpt')
+    parser.add_argument('--llm', type=str, default='gpt', choices=['gpt', 'vllm', 'local'], 
+                        help='使用するLLM: gpt (OpenAI API), vllm (vLLM), local (LM Studio/Ollama)')
     parser.add_argument('--max_depth', type=int, default=2)
     parser.add_argument('--init_levels', type=int, default=1)
     parser.add_argument('--max_density', type=int, default=40)
+    parser.add_argument('--local_api_url', type=str, default=None,
+                        help='ローカルAPIのベースURL (例: http://localhost:1234/v1 for LM Studio)')
+    parser.add_argument('--local_api_key', type=str, default=None,
+                        help='ローカルAPIのキー (LM Studio/Ollamaでは任意の文字列でOK)')
+    parser.add_argument('--local_model_name', type=str, default=None,
+                        help='ローカルモデル名 (例: deepseek-r1-distill-llama-70b-iq3-xs)')
     args = parser.parse_args()
 
     # casestudyの場合はビジネス向けディメンションを使用

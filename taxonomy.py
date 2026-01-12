@@ -1,7 +1,7 @@
 from collections import deque
 from enrichment import enrich_node_prompt
-from classification import classify_prompt
-from model_definitions import promptLLM
+from classification import classify_prompt, init_classify_prompt
+from model_definitions import promptLLM, constructPrompt
 from prompts import EnrichSchema
 import json
 from utils import clean_json_string
@@ -150,7 +150,13 @@ class Node:
         # Which papers are classified to the current node?
         prompts = []
         for paper_id, paper in self.papers.items():
-            prompts.append(classify_prompt(self, paper))
+            if args.llm == 'gpt':
+                # GPTの場合はメッセージ形式に変換
+                main_prompt = classify_prompt(self, paper).replace(init_classify_prompt + '\n\n', '')
+                prompts.append(constructPrompt(args, init_classify_prompt, main_prompt))
+            else:
+                # vLLMの場合は文字列のまま
+                prompts.append(classify_prompt(self, paper))
 
         output = promptLLM(args, prompts, schema=ClassifySchema, max_new_tokens=3000)
         output_dict = [json.loads(clean_json_string(c)) if "```" in c else json.loads(c.strip()) for c in output]
@@ -303,7 +309,13 @@ class DAG:
             # Which papers are classified to the current node?
             prompts = []
             for paper_id, paper in papers.items():
-                prompts.append(classify_prompt(current_node, paper))
+                if args.llm == 'gpt':
+                    # GPTの場合はメッセージ形式に変換
+                    main_prompt = classify_prompt(current_node, paper).replace(init_classify_prompt + '\n\n', '')
+                    prompts.append(constructPrompt(args, init_classify_prompt, main_prompt))
+                else:
+                    # vLLMの場合は文字列のまま
+                    prompts.append(classify_prompt(current_node, paper))
 
             output = promptLLM(args, prompts, schema=ClassifySchema, max_new_tokens=1500)
             output_dict = [json.loads(clean_json_string(c)) if "```" in c else json.loads(c.strip()) for c in output]

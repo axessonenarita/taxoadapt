@@ -49,6 +49,10 @@ elif args.dataset == 'dataset_name':
 ```
 We assume that the dataset has a `title` and `abstract` field for each paper. If not, you can modify the function to extract the relevant fields from your dataset.
 
+## Local LLM Setup (LM Studio/Ollama)
+
+ローカル環境でLLMを実行する場合は、`README_LOCAL_LLM.md`を参照してください。RTX 5090（32GB VRAM）でDeepSeek-R1-Distill-Llama-70B-IQ3_XS.ggufモデルを使用するためのセットアップ手順が記載されています。
+
 ## Video
 You can find a video explanation of the TaxoAdapt framework and its results on YouTube: [TaxoAdapt Video](https://youtu.be/dKUeSm9GoyU).
 

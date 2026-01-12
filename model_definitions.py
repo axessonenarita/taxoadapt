@@ -1,12 +1,31 @@
-from transformers import pipeline
-from vllm import LLM, SamplingParams
-import numpy as np
-import torch
 import os
 from tqdm import tqdm
 import openai
 from openai import OpenAI
-from vllm.sampling_params import GuidedDecodingParams
+
+# オプショナルなインポート（必要な場合のみ）
+try:
+    from transformers import pipeline
+except ImportError:
+    pipeline = None
+
+try:
+    from vllm import LLM, SamplingParams
+    from vllm.sampling_params import GuidedDecodingParams
+except ImportError:
+    LLM = None
+    SamplingParams = None
+    GuidedDecodingParams = None
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
+try:
+    import torch
+except ImportError:
+    torch = None
 
 # .envファイルから環境変数を読み込む（オプション）
 try:
@@ -16,6 +35,9 @@ except ImportError:
     pass  # python-dotenvがインストールされていない場合はスキップ
 
 openai_key = os.getenv('OPENAI_API_KEY')
+local_api_url = os.getenv('LOCAL_API_URL', 'http://localhost:1234/v1')
+local_api_key = os.getenv('LOCAL_API_KEY', 'lm-studio')
+local_model_name = os.getenv('LOCAL_MODEL_NAME', 'qwen/qwen3-vl-30b')
 
 
 # map each term in text to word_id
@@ -78,32 +100,108 @@ def constructPrompt(args, init_prompt, main_prompt):
 def initializeLLM(args):
 	args.client = {}
 
-	args.client['vllm'] = LLM(model="meta-llama/Meta-Llama-3.1-8B-Instruct", tensor_parallel_size=4, gpu_memory_utilization=0.95, 
-						   max_num_batched_tokens=4096, max_num_seqs=1000, enable_prefix_caching=True)
+	# vLLMの初期化（必要な場合のみ）
+	if LLM is not None and args.llm == 'vllm':
+		try:
+			args.client['vllm'] = LLM(model="meta-llama/Meta-Llama-3.1-8B-Instruct", tensor_parallel_size=4, gpu_memory_utilization=0.95, 
+							   max_num_batched_tokens=4096, max_num_seqs=1000, enable_prefix_caching=True)
+		except Exception as e:
+			print(f"警告: vLLMの初期化に失敗しました: {e}")
+			print("GPTを使用します")
+			args.llm = 'gpt'
 
 	if args.llm == 'gpt':
+		if not openai_key:
+			raise ValueError("OPENAI_API_KEY環境変数が設定されていません。.envファイルまたは環境変数で設定してください。")
 		args.client[args.llm] = OpenAI(api_key=openai_key)
+	elif args.llm == 'local':
+		# ローカルAPI（LM Studio/Ollama）の設定
+		api_url = args.local_api_url if hasattr(args, 'local_api_url') and args.local_api_url else local_api_url
+		api_key = args.local_api_key if hasattr(args, 'local_api_key') and args.local_api_key else local_api_key
+		model_name = args.local_model_name if hasattr(args, 'local_model_name') and args.local_model_name else local_model_name
+		
+		args.client['local'] = OpenAI(
+			base_url=api_url,
+			api_key=api_key
+		)
+		args.local_model_name = model_name
+		print(f"ローカルAPIを使用: {api_url}")
+		print(f"モデル名: {model_name}")
 	
 	return args
 
 def promptGPT(args, prompts, schema=None, max_new_tokens=1024, json_mode=True, temperature=0.1, top_p=0.99):
 	outputs = []
-	for messages in tqdm(prompts):
-		if json_mode:
-			response = args.client['gpt'].chat.completions.create(model='gpt-4o-mini-2024-07-18', stream=False, messages=messages, 
-												response_format={"type": "json_object"}, temperature=temperature, top_p=top_p, 
-												max_tokens=max_new_tokens)
-		else:
-			response = args.client['gpt'].chat.completions.create(model='gpt-4o-mini-2024-07-18', stream=False, messages=messages, 
-											 temperature=temperature, top_p=top_p,
-											 max_tokens=max_new_tokens)
-		outputs.append(response.choices[0].message.content)
+	import time
+	import openai
+	
+	# 使用するクライアントとモデル名を決定
+	if args.llm == 'local':
+		client_key = 'local'
+		model_name = getattr(args, 'local_model_name', 'qwen/qwen3-vl-30b')
+		desc = "ローカルLLM API呼び出し"
+	else:
+		client_key = 'gpt'
+		model_name = 'gpt-4o-mini-2024-07-18'
+		desc = "GPT API呼び出し"
+	
+	for idx, messages in enumerate(tqdm(prompts, desc=desc)):
+		max_retries = 3
+		retry_delay = 1
+		
+		for attempt in range(max_retries):
+			try:
+				if json_mode:
+					response = args.client[client_key].chat.completions.create(
+						model=model_name, 
+						stream=False, 
+						messages=messages, 
+						response_format={"type": "json_object"}, 
+						temperature=temperature, 
+						top_p=top_p, 
+						max_tokens=max_new_tokens
+					)
+				else:
+					response = args.client[client_key].chat.completions.create(
+						model=model_name, 
+						stream=False, 
+						messages=messages, 
+						temperature=temperature, 
+						top_p=top_p,
+						max_tokens=max_new_tokens
+					)
+				outputs.append(response.choices[0].message.content)
+				break  # 成功したらループを抜ける
+			except openai.RateLimitError as e:
+				# ローカルAPIではレート制限エラーは発生しないが、互換性のため残す
+				if attempt < max_retries - 1:
+					wait_time = retry_delay * (2 ** attempt)  # 指数バックオフ
+					print(f"\n警告: レート制限エラー (件数 {idx+1}/{len(prompts)})。{wait_time}秒待機してリトライします...")
+					time.sleep(wait_time)
+				else:
+					print(f"\nエラー: レート制限エラーが{max_retries}回続きました。処理を中断します。")
+					raise
+			except openai.APIError as e:
+				if attempt < max_retries - 1:
+					wait_time = retry_delay * (2 ** attempt)
+					print(f"\n警告: APIエラー (件数 {idx+1}/{len(prompts)}): {e}。{wait_time}秒待機してリトライします...")
+					time.sleep(wait_time)
+				else:
+					print(f"\nエラー: APIエラーが{max_retries}回続きました (件数 {idx+1}/{len(prompts)}): {e}")
+					raise
+			except Exception as e:
+				print(f"\nエラー: 予期しないエラーが発生しました (件数 {idx+1}/{len(prompts)}): {e}")
+				raise
 	return outputs
 
 def promptLlamaVLLM(args, prompts, schema=None, max_new_tokens=1024, temperature=0.1, top_p=0.99):
+    if LLM is None or SamplingParams is None:
+        raise ImportError("vLLMがインストールされていません。GPTを使用するか、vLLMをインストールしてください。")
     if schema is None:
         sampling_params = SamplingParams(temperature=temperature, top_p=top_p, max_tokens=max_new_tokens)
     else:
+        if GuidedDecodingParams is None:
+            raise ImportError("vLLMのGuidedDecodingParamsが利用できません。")
         guided_decoding_params = GuidedDecodingParams(json=schema.model_json_schema())
         sampling_params = SamplingParams(temperature=temperature, top_p=top_p, max_tokens=max_new_tokens, 
                                     guided_decoding=guided_decoding_params)
@@ -116,7 +214,7 @@ def promptLlamaVLLM(args, prompts, schema=None, max_new_tokens=1024, temperature
     return outputs
 
 def promptLLM(args, prompts, schema=None, max_new_tokens=1024, json_mode=True, temperature=0.1, top_p=0.99):
-	if args.llm == 'gpt':
+	if args.llm == 'gpt' or args.llm == 'local':
 		return promptGPT(args, prompts, schema, max_new_tokens, json_mode, temperature, top_p)
 	else:
 		return promptLlamaVLLM(args, prompts, schema, max_new_tokens, temperature, top_p)
