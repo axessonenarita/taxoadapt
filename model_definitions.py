@@ -8,6 +8,13 @@ import openai
 from openai import OpenAI
 from vllm.sampling_params import GuidedDecodingParams
 
+# .envファイルから環境変数を読み込む（オプション）
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenvがインストールされていない場合はスキップ
+
 openai_key = os.getenv('OPENAI_API_KEY')
 
 
