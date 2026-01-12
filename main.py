@@ -142,44 +142,8 @@ def construct_dataset(args):
         
         return internal_collection, internal_count
     
-    # 既存のデータセット処理
-    if args.dataset == 'emnlp_2024':
-        ds = load_dataset("EMNLP/EMNLP2024-papers")
-    elif args.dataset == 'emnlp_2022':
-        ds = load_dataset("TimSchopf/nlp_taxonomy_data")
-        split = 'test'
-    elif args.dataset == 'cvpr_2024':
-        ds = load_dataset("DeepNLP/CVPR-2024-Accepted-Papers")
-    elif args.dataset == 'cvpr_2020':
-        ds = load_dataset("DeepNLP/CVPR-2020-Accepted-Papers")
-    elif args.dataset == 'iclr_2024':
-        ds = load_dataset("DeepNLP/ICLR-2024-Accepted-Papers")
-    elif args.dataset == 'iclr_2021':
-        ds = load_dataset("DeepNLP/ICLR-2021-Accepted-Papers")
-    elif args.dataset == 'icra_2024':
-        ds = load_dataset("DeepNLP/ICRA-2024-Accepted-Papers")
-    else:
-        ds = load_dataset("DeepNLP/ICRA-2020-Accepted-Papers")
-    
-    
-    internal_collection = {}
-
-    with open(os.path.join(args.data_dir, 'internal.txt'), 'w', encoding='utf-8') as i:
-        internal_count = 0
-        id = 0
-        for p in tqdm(ds[split]):
-            if ('title' not in p) and ('abstract' not in p):
-                continue
-            
-            temp_dict = {"Title": p['title'], "Abstract": p['abstract']}
-            formatted_dict = json.dumps(temp_dict)
-            i.write(f'{formatted_dict}\n')
-            internal_collection[id] = Paper(id, p['title'], p['abstract'], label_opts=args.dimensions, internal=True)
-            internal_count += 1
-            id += 1
-        print("Total # of Papers: ", internal_count)
-    
-    return internal_collection, internal_count
+    # その他のデータセットは未対応
+    raise ValueError(f"未対応のデータセット: {args.dataset}。'casestudy'のみ対応しています。")
 
 def initialize_DAG(args):
     ## we want to make this a directed acyclic graph (DAG) so maintain a list of the nodes
@@ -250,6 +214,14 @@ def main(args):
     
     print(f'Internal: {internal_count}')
 
+    # データサイズに応じてmax_densityを調整
+    if args.dataset == 'casestudy':
+        # 小規模データセットの場合は、データ数の10-15%程度を閾値にする
+        if internal_count < 200:
+            original_max_density = args.max_density
+            args.max_density = max(10, int(internal_count * 0.15))  # 97件なら約14件
+            print(f"Adjusted max_density from {original_max_density} to {args.max_density} for small dataset ({internal_count} papers)")
+
     print("######## STEP 2: INITIALIZE DAG ########")
     args = initializeLLM(args)
 
@@ -308,9 +280,20 @@ def main(args):
 
     visited = set()
     queue = deque([roots[r] for r in roots])
+    
+    # 途中経過保存用のカウンター
+    iteration_count = 0
+    save_interval = 10  # 10ノード処理ごとに保存
+    
+    # 既存データがあるディメンションは幅方向展開をスキップ
+    skip_width_expansion_dims = set()
+    if args.dataset == 'casestudy':
+        # 業種と会社規模は既存データがあるため、幅方向展開をスキップ
+        skip_width_expansion_dims = {'業種', '会社規模'}
 
     while queue:
         curr_node = queue.popleft()
+        iteration_count += 1
         print(f'VISITING {curr_node.label} ({curr_node.dimension}) AT LEVEL {curr_node.level}. WE HAVE {len(queue)} NODES LEFT IN THE QUEUE!')
         
         if len(curr_node.children) > 0:
@@ -321,9 +304,21 @@ def main(args):
             # classify
             curr_node.classify_node(args, label2node, visited)
 
-            # sibling expansion if needed
-            new_sibs = expandNodeWidth(args, curr_node, id2node, label2node)
-            print(f'(WIDTH EXPANSION) new children for {curr_node.label} ({curr_node.dimension}) are: {str((new_sibs))}')
+            # sibling expansion if needed (業種と会社規模は条件付きでスキップ)
+            if curr_node.dimension not in skip_width_expansion_dims:
+                new_sibs = expandNodeWidth(args, curr_node, id2node, label2node)
+                print(f'(WIDTH EXPANSION) new children for {curr_node.label} ({curr_node.dimension}) are: {str((new_sibs))}')
+            else:
+                # 未分類論文の数を確認
+                unlabeled_count = sum(1 for idx in curr_node.papers 
+                                     if not any(idx in c.papers for c in curr_node.children.values()))
+                # 未分類論文が多い場合のみ幅方向展開を実行
+                if unlabeled_count > args.max_density:
+                    print(f'(WIDTH EXPANSION) {curr_node.label} ({curr_node.dimension}) has {unlabeled_count} unlabeled papers, executing width expansion despite skip flag')
+                    new_sibs = expandNodeWidth(args, curr_node, id2node, label2node)
+                else:
+                    new_sibs = []
+                    print(f'(WIDTH EXPANSION SKIPPED) {curr_node.label} ({curr_node.dimension}) has {unlabeled_count} unlabeled papers (threshold: {args.max_density}), skipping width expansion')
 
             # re-classify and re-do process if necessary
             if len(new_sibs) > 0:
@@ -341,6 +336,14 @@ def main(args):
             print(f'(DEPTH EXPANSION) new {len(new_children)} children for {curr_node.label} ({curr_node.dimension}) are: {str((new_children))}')
             if (len(new_children) > 0) and success:
                 queue.append(curr_node)
+        
+        # 途中経過を定期的に保存
+        if iteration_count % save_interval == 0:
+            print(f"######## CHECKPOINT: Saving intermediate taxonomy at iteration {iteration_count} ########")
+            for dim in args.dimensions:
+                with open(f'{args.data_dir}/intermediate_taxo_{dim}_iter{iteration_count}.txt', 'w', encoding='utf-8') as f:
+                    with redirect_stdout(f):
+                        roots[dim].display(0, indent_multiplier=5)
     
     print("######## STEP 5: SAVE THE TAXONOMY ########")
     for dim in args.dimensions:
