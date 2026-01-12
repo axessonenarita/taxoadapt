@@ -10,11 +10,26 @@ import sys
 import io
 
 # Windowsのコンソール出力のエンコーディング問題を回避
-if sys.platform == 'win32' and hasattr(sys.stdout, 'buffer'):
+if sys.platform == 'win32':
+    import os
+    # 環境変数でUTF-8を強制（最初に設定）
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+    
+    # コンソールのコードページをUTF-8に設定（PowerShell/CMD）
     try:
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    except (AttributeError, ValueError):
-        pass  # 既に設定されているか、設定できない場合はスキップ
+        import subprocess
+        subprocess.run(['chcp', '65001'], shell=True, capture_output=True, check=False)
+    except:
+        pass
+    
+    # sys.stdoutのエンコーディング設定
+    if hasattr(sys.stdout, 'buffer'):
+        try:
+            # 既にラップされている場合はスキップ
+            if not isinstance(sys.stdout, io.TextIOWrapper) or sys.stdout.encoding != 'utf-8':
+                sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        except (AttributeError, ValueError):
+            pass
 
 from model_definitions import initializeLLM, promptLLM, constructPrompt
 from prompts import (multi_dim_prompt, NodeListSchema, type_cls_system_instruction, type_cls_main_prompt, TypeClsSchema,
@@ -45,7 +60,7 @@ def construct_dataset(args):
             internal_count = 0
             id = 0
             
-            for md_file in tqdm(md_files, desc="Loading casestudy files"):
+            for md_file in tqdm(md_files, desc="Loading casestudy files", ncols=100, ascii=False):
                 try:
                     with open(md_file, 'r', encoding='utf-8') as f:
                         content = f.read()
@@ -269,12 +284,21 @@ def main(args):
         roots[r].papers = {}
     type_dist = {dim:[] for dim in args.dimensions}
     for p_id, out in enumerate(outputs):
-        internal_collection[p_id].labels = {}
+        paper = internal_collection[p_id]
+        paper.labels = {}
+        
+        # 既存のIndustryとRevenueSizeタグがある場合は、業種と会社規模を自動的にTrueに設定
+        if args.dataset == 'casestudy':
+            if hasattr(paper, 'company_industry') and paper.company_industry:
+                out['業種'] = True
+            if hasattr(paper, 'company_revenue_size') and paper.company_revenue_size:
+                out['会社規模'] = True
+        
         for key, val in out.items():
             if val:
-                type_dist[key].append(internal_collection[p_id])
-                internal_collection[p_id].labels[key] = []
-                roots[key].papers[p_id] = internal_collection[p_id]
+                type_dist[key].append(paper)
+                paper.labels[key] = []
+                roots[key].papers[p_id] = paper
     
     print(str({k:len(v) for k,v in type_dist.items()}))
 

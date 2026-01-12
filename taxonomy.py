@@ -150,15 +150,11 @@ class Node:
         # Which papers are classified to the current node?
         prompts = []
         for paper_id, paper in self.papers.items():
-            if args.llm == 'gpt':
-                # GPTの場合はメッセージ形式に変換
-                main_prompt = classify_prompt(self, paper).replace(init_classify_prompt + '\n\n', '')
-                prompts.append(constructPrompt(args, init_classify_prompt, main_prompt))
-            else:
-                # vLLMの場合は文字列のまま
-                prompts.append(classify_prompt(self, paper))
+            # GPT/ローカルAPIの場合はメッセージ形式に変換
+            main_prompt = classify_prompt(self, paper).replace(init_classify_prompt + '\n\n', '')
+            prompts.append(constructPrompt(args, init_classify_prompt, main_prompt))
 
-        output = promptLLM(args, prompts, schema=ClassifySchema, max_new_tokens=3000)
+            output = promptLLM(args, prompts, schema=ClassifySchema, max_new_tokens=3000, json_mode=True)
         output_dict = [json.loads(clean_json_string(c)) if "```" in c else json.loads(c.strip()) for c in output]
         class_options = [c for c in self.get_children()]
         class_map = {c:0 for c in self.get_children()}
@@ -309,15 +305,11 @@ class DAG:
             # Which papers are classified to the current node?
             prompts = []
             for paper_id, paper in papers.items():
-                if args.llm == 'gpt':
-                    # GPTの場合はメッセージ形式に変換
-                    main_prompt = classify_prompt(current_node, paper).replace(init_classify_prompt + '\n\n', '')
-                    prompts.append(constructPrompt(args, init_classify_prompt, main_prompt))
-                else:
-                    # vLLMの場合は文字列のまま
-                    prompts.append(classify_prompt(current_node, paper))
+                # GPT/ローカルAPIの場合はメッセージ形式に変換
+                main_prompt = classify_prompt(current_node, paper).replace(init_classify_prompt + '\n\n', '')
+                prompts.append(constructPrompt(args, init_classify_prompt, main_prompt))
 
-            output = promptLLM(args, prompts, schema=ClassifySchema, max_new_tokens=1500)
+            output = promptLLM(args, prompts, schema=ClassifySchema, max_new_tokens=1500, json_mode=True)
             output_dict = [json.loads(clean_json_string(c)) if "```" in c else json.loads(c.strip()) for c in output]
             class_options = [c for c in current_node.get_children()]
 

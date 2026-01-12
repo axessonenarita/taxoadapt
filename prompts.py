@@ -85,17 +85,16 @@ def multi_dim_prompt(node):
     if ('domain' in node.dimension) or ('application' in node.dimension):
         main_prompt += f'\n Remember that {node.dimension} means a real-world domain category in which a paper can be applied to (for example, news or science could be a subcategory of {node.dimension}).'
 
-    json_output_format = f'''Output your taxonomy ONLY in the following JSON format, replacing each label name key with its correct subcategory label name:\n
+    json_output_format = f'''Output your taxonomy ONLY in the following JSON format, replacing each label name key with its correct subcategory label name. IMPORTANT: Output ONLY valid JSON, no markdown code blocks, no explanations, just the JSON object:\n
 {{
-  root_topic:
-  {{
+  "root_topic": {{
     "<label name of your first sub-category>": {{
       "description": "<generate a string description of your subcategory>"
     }},
     ...,
     "<label name of your kth (max 5th) sub-category>": {{
       "description": "<generate a string description of subtask_k>"
-    }},
+    }}
   }}
 }}'''
     
@@ -182,12 +181,33 @@ Your output should be in the following JSON format:
 # Business case study main prompt
 def business_type_cls_main_prompt(paper):
    company_info = ""
+   has_industry = hasattr(paper, 'company_industry') and paper.company_industry
+   has_revenue_size = hasattr(paper, 'company_revenue_size') and paper.company_revenue_size
+   
    if hasattr(paper, 'company_name') and paper.company_name:
        company_info = f'\n"Company": "{paper.company_name}"'
-       if hasattr(paper, 'company_industry') and paper.company_industry:
+       if has_industry:
            company_info += f'\n"Industry": "{paper.company_industry}"'
-       if hasattr(paper, 'company_revenue_size') and paper.company_revenue_size:
+       if has_revenue_size:
            company_info += f'\n"RevenueSize": "{paper.company_revenue_size}"'
+   
+   # 業種と会社規模が既に設定されている場合は、プロンプトから除外
+   dimension_prompts = []
+   if not has_industry:
+       dimension_prompts.append('  "業種": <事例が業種に関する情報を含む場合はTrue、そうでなければFalse>,')
+   else:
+       dimension_prompts.append('  "業種": True,  # 既にIndustryタグが設定されているためTrue')
+   
+   dimension_prompts.append('  "業務領域": <事例が業務領域に関する情報を含む場合はTrue、そうでなければFalse>,')
+   dimension_prompts.append('  "導入効果": <事例が導入効果に関する情報を含む場合はTrue、そうでなければFalse>,')
+   dimension_prompts.append('  "技術領域": <事例が技術領域に関する情報を含む場合はTrue、そうでなければFalse>,')
+   dimension_prompts.append('  "導入形態": <事例が導入形態に関する情報を含む場合はTrue、そうでなければFalse>,')
+   dimension_prompts.append('  "業務課題": <事例が業務課題に関する情報を含む場合はTrue、そうでなければFalse>,')
+   
+   if not has_revenue_size:
+       dimension_prompts.append('  "会社規模": <事例が会社規模に関する情報を含む場合、または推測可能な場合はTrue、そうでなければFalse>')
+   else:
+       dimension_prompts.append('  "会社規模": True  # 既にRevenueSizeタグが設定されているためTrue')
    
    out = f"""以下の導入事例のタイトルと本文を読み、該当するディメンションをすべて出力してください。
 
@@ -196,13 +216,7 @@ def business_type_cls_main_prompt(paper):
 
 出力は以下のJSON形式で行ってください:
 {{
-  "業種": <事例が業種に関する情報を含む場合はTrue、そうでなければFalse>,
-  "業務領域": <事例が業務領域に関する情報を含む場合はTrue、そうでなければFalse>,
-  "導入効果": <事例が導入効果に関する情報を含む場合はTrue、そうでなければFalse>,
-  "技術領域": <事例が技術領域に関する情報を含む場合はTrue、そうでなければFalse>,
-  "導入形態": <事例が導入形態に関する情報を含む場合はTrue、そうでなければFalse>,
-  "業務課題": <事例が業務課題に関する情報を含む場合はTrue、そうでなければFalse>,
-  "会社規模": <事例が会社規模に関する情報を含む場合、または推測可能な場合はTrue、そうでなければFalse>
+{chr(10).join(dimension_prompts)}
 }}
 """
    return out

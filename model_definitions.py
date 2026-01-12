@@ -3,6 +3,11 @@ from tqdm import tqdm
 import openai
 from openai import OpenAI
 
+# Windowsのコンソール出力のエンコーディング問題を回避
+# main.pyで既に設定されているため、ここでは環境変数のみ設定
+if os.name == 'nt':  # Windows
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+
 # オプショナルなインポート（必要な場合のみ）
 try:
     from transformers import pipeline
@@ -90,11 +95,13 @@ def chunkify(text, token_lens, length=512):
 	return chunks
 
 def constructPrompt(args, init_prompt, main_prompt):
-	if (args.llm == 'gpt'):
+	# GPT APIとローカルAPI（LM Studio/Ollama）は同じメッセージ形式を使用
+	if (args.llm == 'gpt' or args.llm == 'local'):
 		return [
             {"role": "system", "content": init_prompt},
             {"role": "user", "content": main_prompt}]
 	else:
+		# vLLMなどの場合は文字列形式
 		return init_prompt + "\n\n" + main_prompt
 
 def initializeLLM(args):
@@ -125,8 +132,8 @@ def initializeLLM(args):
 			api_key=api_key
 		)
 		args.local_model_name = model_name
-		print(f"ローカルAPIを使用: {api_url}")
-		print(f"モデル名: {model_name}")
+		print(f"Local API: {api_url}")
+		print(f"Model: {model_name}")
 	
 	return args
 
@@ -134,42 +141,70 @@ def promptGPT(args, prompts, schema=None, max_new_tokens=1024, json_mode=True, t
 	outputs = []
 	import time
 	import openai
+	import json
 	
 	# 使用するクライアントとモデル名を決定
 	if args.llm == 'local':
 		client_key = 'local'
 		model_name = getattr(args, 'local_model_name', 'qwen/qwen3-vl-30b')
-		desc = "ローカルLLM API呼び出し"
+		desc = "Local LLM API"
 	else:
 		client_key = 'gpt'
 		model_name = 'gpt-4o-mini-2024-07-18'
-		desc = "GPT API呼び出し"
+		desc = "GPT API"
 	
-	for idx, messages in enumerate(tqdm(prompts, desc=desc)):
+	for idx, messages in enumerate(tqdm(prompts, desc=desc, ncols=80, ascii=True)):
 		max_retries = 3
 		retry_delay = 1
 		
 		for attempt in range(max_retries):
 			try:
+				# リクエストパラメータの構築
+				create_params = {
+					'model': model_name,
+					'stream': False,
+					'messages': messages,
+					'temperature': temperature,
+					'top_p': top_p,
+				}
+				
+				# max_tokensの設定（0より大きい場合のみ設定）
+				if max_new_tokens > 0:
+					create_params['max_tokens'] = max_new_tokens
+				
+				# JSONモードの設定
+				# Alibaba Cloud Model StudioのQwen APIリファレンスに基づき、
+				# OpenAI互換APIではresponse_formatがサポートされている
+				# GPT API使用時: json_object
+				# LM Studio経由のQwenモデル: json_schema（スキーマ定義が必要）
 				if json_mode:
-					response = args.client[client_key].chat.completions.create(
-						model=model_name, 
-						stream=False, 
-						messages=messages, 
-						response_format={"type": "json_object"}, 
-						temperature=temperature, 
-						top_p=top_p, 
-						max_tokens=max_new_tokens
-					)
-				else:
-					response = args.client[client_key].chat.completions.create(
-						model=model_name, 
-						stream=False, 
-						messages=messages, 
-						temperature=temperature, 
-						top_p=top_p,
-						max_tokens=max_new_tokens
-					)
+					if args.llm == 'local':
+						# ローカルAPI（LM Studio/Ollama）使用時はjson_schemaを使用
+						# schemaが提供されている場合は、JSONスキーマを生成
+						if schema is not None:
+							try:
+								# PydanticスキーマからJSONスキーマを生成
+								json_schema = schema.model_json_schema()
+								create_params['response_format'] = {
+									"type": "json_schema",
+									"json_schema": {
+										"name": schema.__name__ if hasattr(schema, '__name__') else "response",
+										"strict": True,
+										"schema": json_schema
+									}
+								}
+							except Exception as e:
+								# スキーマ生成に失敗した場合は、プロンプト内でJSON形式を指定
+								print(f"警告: JSONスキーマの生成に失敗しました: {e}。プロンプト内でJSON形式を指定します。")
+								pass
+						else:
+							# schemaが提供されていない場合は、プロンプト内でJSON形式を指定
+							pass
+					else:
+						# GPT API使用時はjson_objectを使用
+						create_params['response_format'] = {"type": "json_object"}
+				
+				response = args.client[client_key].chat.completions.create(**create_params)
 				outputs.append(response.choices[0].message.content)
 				break  # 成功したらループを抜ける
 			except openai.RateLimitError as e:
@@ -184,10 +219,23 @@ def promptGPT(args, prompts, schema=None, max_new_tokens=1024, json_mode=True, t
 			except openai.APIError as e:
 				if attempt < max_retries - 1:
 					wait_time = retry_delay * (2 ** attempt)
-					print(f"\n警告: APIエラー (件数 {idx+1}/{len(prompts)}): {e}。{wait_time}秒待機してリトライします...")
+					print(f"\n警告: APIエラー (件数 {idx+1}/{len(prompts)}): {e}")
+					if hasattr(e, 'response') and e.response is not None:
+						try:
+							error_body = e.response.text
+							print(f"エラー詳細: {error_body}")
+						except:
+							pass
+					print(f"{wait_time}秒待機してリトライします...")
 					time.sleep(wait_time)
 				else:
 					print(f"\nエラー: APIエラーが{max_retries}回続きました (件数 {idx+1}/{len(prompts)}): {e}")
+					if hasattr(e, 'response') and e.response is not None:
+						try:
+							error_body = e.response.text
+							print(f"エラー詳細: {error_body}")
+						except:
+							pass
 					raise
 			except Exception as e:
 				print(f"\nエラー: 予期しないエラーが発生しました (件数 {idx+1}/{len(prompts)}): {e}")

@@ -14,11 +14,20 @@ from sklearn.preprocessing import MultiLabelBinarizer
 
 
 def clean_json_string(json_string):
+    # マークダウンコードブロックを削除
     pattern = r'^```json\s*(.*?)\s*```$'
     cleaned_string = re.sub(pattern, r'\1', json_string, flags=re.DOTALL)
     pattern = r'^```\s*(.*?)\s*```$'
     cleaned_string = re.sub(pattern, r'\1', cleaned_string, flags=re.DOTALL)
-    return cleaned_string.strip()
+    cleaned_string = cleaned_string.strip()
+    
+    # JSONの末尾のカンマを削除（オブジェクトと配列の両方）
+    # オブジェクト内の末尾カンマ: }, または ,}
+    cleaned_string = re.sub(r',\s*}', '}', cleaned_string)
+    # 配列内の末尾カンマ: ], または ,]
+    cleaned_string = re.sub(r',\s*]', ']', cleaned_string)
+    
+    return cleaned_string
 
 
 # ENRICHMENT HELPER FUNCTIONS
