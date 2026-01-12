@@ -1,23 +1,261 @@
 import os
 import json
+import re
+import glob
 from collections import deque
 from contextlib import redirect_stdout
 import argparse
 from tqdm import tqdm
 
 from model_definitions import initializeLLM, promptLLM, constructPrompt
-from prompts import multi_dim_prompt, NodeListSchema, type_cls_system_instruction, type_cls_main_prompt, TypeClsSchema
+from prompts import (multi_dim_prompt, NodeListSchema, type_cls_system_instruction, type_cls_main_prompt, TypeClsSchema,
+                     business_type_cls_system_instruction, business_type_cls_main_prompt, BusinessTypeClsSchema)
 from taxonomy import Node, DAG
 from datasets import load_dataset
 from expansion import expandNodeWidth, expandNodeDepth
 from paper import Paper
 from utils import clean_json_string
 
+def extract_company_name(content):
+    """Markdownファイルから会社名を抽出"""
+    # パターン1: 「### 会社名」形式（基本情報セクション内）
+    pattern1 = r'###\s+([^#\n]+(?:株式会社|有限会社|合資会社|合名会社|合同会社|一般社団法人|財団法人|協同組合|組合)[^\n]*)'
+    match1 = re.search(pattern1, content)
+    if match1:
+        company_name = match1.group(1).strip()
+        # 「様」を除去
+        company_name = company_name.replace('様', '').strip()
+        return company_name
+    
+    # パターン2: 「会社名様」形式（タイトルの直後）
+    pattern2 = r'^#\s+[^\n]+\n+\n+([^#\n]+(?:株式会社|有限会社|合資会社|合名会社|合同会社|一般社団法人|財団法人|協同組合|組合)[^\n]*様?)'
+    match2 = re.search(pattern2, content, re.MULTILINE)
+    if match2:
+        company_name = match2.group(1).strip()
+        company_name = company_name.replace('様', '').strip()
+        return company_name
+    
+    return None
+
+def extract_metadata_from_markdown(content):
+    """MarkdownファイルのYAMLフロントマターからメタデータを抽出"""
+    # YAMLフロントマターのパターン（---で囲まれた部分）
+    frontmatter_pattern = r'^---\s*\n(.*?)\n---\s*\n'
+    frontmatter_match = re.search(frontmatter_pattern, content, re.DOTALL | re.MULTILINE)
+    
+    if not frontmatter_match:
+        return None
+    
+    frontmatter_text = frontmatter_match.group(1)
+    metadata = {}
+    
+    # YAML形式のパース（簡易版）
+    for line in frontmatter_text.split('\n'):
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        
+        # key: value 形式をパース
+        if ':' in line:
+            key, value = line.split(':', 1)
+            key = key.strip()
+            value = value.strip()
+            # クォートを除去
+            value = value.strip('"\'')
+            metadata[key] = value
+    
+    return metadata if metadata else None
+
+def extract_company_info_from_markdown(content, company_name):
+    """Markdownファイルから会社情報を抽出（YAMLフロントマター優先、基本情報セクションはフォールバック）"""
+    if not company_name:
+        return None
+    
+    # まずYAMLフロントマターから抽出を試みる
+    metadata = extract_metadata_from_markdown(content)
+    if metadata:
+        company_info = {}
+        if 'company_industry' in metadata or 'industry' in metadata:
+            company_info['industry'] = metadata.get('company_industry') or metadata.get('industry')
+        if 'company_revenue_size' in metadata or 'revenue_size' in metadata:
+            company_info['revenue_size'] = metadata.get('company_revenue_size') or metadata.get('revenue_size')
+        
+        if company_info.get('industry') or company_info.get('revenue_size'):
+            return company_info
+    
+    # フロントマターに情報がない場合は、基本情報セクションから抽出（フォールバック）
+    basic_info_pattern = r'##\s+基本情報\s+(.*?)(?=##|\Z)'
+    basic_info_match = re.search(basic_info_pattern, content, re.DOTALL)
+    
+    if not basic_info_match:
+        return None
+    
+    basic_info_section = basic_info_match.group(1)
+    
+    # 会社名のセクションを抽出
+    company_section_pattern = rf'###\s+{re.escape(company_name)}.*?(?=###|\Z)'
+    company_section_match = re.search(company_section_pattern, basic_info_section, re.DOTALL)
+    
+    if not company_section_match:
+        return None
+    
+    company_section = company_section_match.group(0)
+    
+    # 業種を抽出
+    industry_pattern = r'業種[：:]\s*([^\n]+)'
+    industry_match = re.search(industry_pattern, company_section)
+    industry = industry_match.group(1).strip() if industry_match else None
+    
+    # 売上規模を抽出
+    revenue_pattern = r'売上規模[：:]\s*([^\n]+)'
+    revenue_match = re.search(revenue_pattern, company_section)
+    revenue_size = revenue_match.group(1).strip() if revenue_match else None
+    
+    if industry or revenue_size:
+        return {
+            'industry': industry,
+            'revenue_size': revenue_size
+        }
+    
+    return None
+
+def investigate_company_info(company_name, manual_info_file='datasets/casestudy/company_info.json'):
+    """手動入力ファイルから会社の業種と売上規模を読み込む"""
+    import json
+    
+    # 手動入力ファイルを読み込み
+    if os.path.exists(manual_info_file):
+        try:
+            with open(manual_info_file, 'r', encoding='utf-8') as f:
+                manual_info = json.load(f)
+            
+            # 会社名で検索（完全一致または部分一致）
+            if company_name in manual_info:
+                return manual_info[company_name]
+            
+            # 部分一致で検索（「株式会社」などの表記揺れに対応）
+            for key, value in manual_info.items():
+                if company_name in key or key in company_name:
+                    return value
+        except Exception as e:
+            print(f"Warning: Failed to load company info file: {e}")
+    
+    # 見つからない場合はNoneを返す
+    return {
+        'industry': None,
+        'revenue_size': None
+    }
+
 def construct_dataset(args):
     if not os.path.exists(args.data_dir):
         os.makedirs(args.data_dir)
     split = 'train'
     
+    if args.dataset == 'casestudy':
+        # casestudyフォルダからMarkdownファイルを読み込む
+        casestudy_dir = 'assets/casestudy'
+        md_files = glob.glob(os.path.join(casestudy_dir, '*.md'))
+        md_files = [f for f in md_files if not os.path.basename(f).startswith('INDEX')]
+        md_files.sort()
+        
+        internal_collection = {}
+        company_info_cache = {}
+        
+        with open(os.path.join(args.data_dir, 'internal.txt'), 'w', encoding='utf-8') as i:
+            internal_count = 0
+            id = 0
+            
+            for md_file in tqdm(md_files, desc="Loading casestudy files"):
+                try:
+                    with open(md_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    
+                    # タイトルを抽出（最初の#見出し）
+                    title_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+                    if title_match:
+                        title = title_match.group(1).strip()
+                    else:
+                        # ファイル名から抽出
+                        basename = os.path.basename(md_file)
+                        title = re.sub(r'^\d+_', '', basename).replace('.md', '')
+                    
+                    # 本文（abstract相当）は全内容を使用
+                    abstract = content
+                    
+                    # 会社名を抽出
+                    company_name = extract_company_name(content)
+                    
+                    # 会社情報を抽出（Markdownファイルから優先、なければ手動入力ファイルから）
+                    company_info = None
+                    if company_name:
+                        # まずMarkdownファイルから抽出を試みる
+                        company_info = extract_company_info_from_markdown(content, company_name)
+                        
+                        # Markdownファイルに情報がない場合は、手動入力ファイルから読み込む
+                        if not company_info or (not company_info.get('industry') and not company_info.get('revenue_size')):
+                            manual_info = investigate_company_info(company_name, 
+                                                                   manual_info_file=os.path.join(args.data_dir, 'company_info.json'))
+                            # 手動入力ファイルの情報で上書き（Markdownの情報があれば優先）
+                            if manual_info:
+                                if not company_info:
+                                    company_info = {}
+                                if not company_info.get('industry') and manual_info.get('industry'):
+                                    company_info['industry'] = manual_info['industry']
+                                if not company_info.get('revenue_size') and manual_info.get('revenue_size'):
+                                    company_info['revenue_size'] = manual_info['revenue_size']
+                        
+                        if company_info:
+                            company_info_cache[company_name] = company_info
+                    
+                    # Paperオブジェクトを作成
+                    paper = Paper(id, title, abstract, label_opts=args.dimensions, internal=True)
+                    if company_info:
+                        paper.company_name = company_name
+                        paper.company_industry = company_info.get('industry')
+                        paper.company_revenue_size = company_info.get('revenue_size')
+                    
+                    temp_dict = {"Title": title, "Abstract": abstract}
+                    if company_name:
+                        temp_dict["Company"] = company_name
+                    if company_info:
+                        temp_dict["Industry"] = company_info.get('industry')
+                        temp_dict["RevenueSize"] = company_info.get('revenue_size')
+                    
+                    formatted_dict = json.dumps(temp_dict, ensure_ascii=False)
+                    i.write(f'{formatted_dict}\n')
+                    internal_collection[id] = paper
+                    internal_count += 1
+                    id += 1
+                except Exception as e:
+                    print(f"Error processing {md_file}: {e}")
+                    continue
+            
+            print("Total # of Papers: ", internal_count)
+        
+        # 会社情報をJSONファイルに自動生成
+        if company_info_cache:
+            cache_file = os.path.join(args.data_dir, 'company_info.json')
+            # 既存のファイルがあれば読み込んでマージ（手動入力の情報を保持）
+            existing_info = {}
+            if os.path.exists(cache_file):
+                try:
+                    with open(cache_file, 'r', encoding='utf-8') as f:
+                        existing_info = json.load(f)
+                except:
+                    pass
+            
+            # Markdownから抽出した情報で更新（既存の情報は保持）
+            merged_info = existing_info.copy()
+            for company_name, info in company_info_cache.items():
+                if company_name not in merged_info or not merged_info[company_name].get('industry') or not merged_info[company_name].get('revenue_size'):
+                    merged_info[company_name] = info
+            
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(merged_info, f, ensure_ascii=False, indent=2)
+        
+        return internal_collection, internal_count
+    
+    # 既存のデータセット処理
     if args.dataset == 'emnlp_2024':
         ds = load_dataset("EMNLP/EMNLP2024-papers")
     elif args.dataset == 'emnlp_2022':
@@ -141,9 +379,18 @@ def main(args):
     dags = {dim:DAG(root=root, dim=dim) for dim, root in roots.items()}
 
     # do for internal collection
+    # ビジネス向けかどうかでスキーマとプロンプトを切り替え
+    if args.dataset == 'casestudy':
+        system_instruction = business_type_cls_system_instruction
+        main_prompt_func = business_type_cls_main_prompt
+        schema = BusinessTypeClsSchema
+    else:
+        system_instruction = type_cls_system_instruction
+        main_prompt_func = type_cls_main_prompt
+        schema = TypeClsSchema
 
-    prompts = [constructPrompt(args, type_cls_system_instruction, type_cls_main_prompt(paper)) for paper in internal_collection.values()]
-    outputs = promptLLM(args=args, prompts=prompts, schema=TypeClsSchema, max_new_tokens=500, json_mode=True, temperature=0.1, top_p=0.99)
+    prompts = [constructPrompt(args, system_instruction, main_prompt_func(paper)) for paper in internal_collection.values()]
+    outputs = promptLLM(args=args, prompts=prompts, schema=schema, max_new_tokens=500, json_mode=True, temperature=0.1, top_p=0.99)
     outputs = [json.loads(clean_json_string(c)) if "```" in c else json.loads(c.strip()) for c in outputs]
 
     for r in roots:
@@ -213,15 +460,19 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--topic', type=str, default='natural language processing')
-    parser.add_argument('--dataset', type=str, default='llm_graph')
+    parser.add_argument('--topic', type=str, default='ビジネスソリューション導入事例')
+    parser.add_argument('--dataset', type=str, default='casestudy')
     parser.add_argument('--llm', type=str, default='gpt')
     parser.add_argument('--max_depth', type=int, default=2)
     parser.add_argument('--init_levels', type=int, default=1)
     parser.add_argument('--max_density', type=int, default=40)
     args = parser.parse_args()
 
-    args.dimensions = ["tasks", "datasets", "methodologies", "evaluation_methods", "real_world_domains"]
+    # casestudyの場合はビジネス向けディメンションを使用
+    if args.dataset == 'casestudy':
+        args.dimensions = ["業種", "業務領域", "導入効果", "技術領域", "導入形態", "業務課題", "会社規模"]
+    else:
+        args.dimensions = ["tasks", "datasets", "methodologies", "evaluation_methods", "real_world_domains"]
 
     args.data_dir = f"datasets/{args.dataset.lower().replace(' ', '_')}"
     args.internal = f"{args.dataset}.txt"

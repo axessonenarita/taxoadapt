@@ -1,0 +1,386 @@
+{
+  "東急不動産ホールディングス株式会社": {
+    "industry": "不動産",
+    "revenue_size": "1000億円以上"
+  },
+  "東ソー情報システム株式会社（南陽事業所）": {
+    "industry": "IT",
+    "revenue_size": "100億～500億円"
+  },
+  "株式会社オプテージ": {
+    "industry": "IT",
+    "revenue_size": "100億～500億円"
+  },
+  "エクシオグループ株式会社": {
+    "industry": "IT",
+    "revenue_size": "1000億円以上"
+  },
+  "三井住友トラスト・アセットマネジメント株式会社": {
+    "industry": "金融",
+    "revenue_size": "1000億円以上"
+  },
+  "第一三共株式会社": {
+    "industry": "製造業",
+    "revenue_size": "1000億円以上"
+  },
+  "学校法人文化学園": {
+    "industry": "IT",
+    "revenue_size": "100億～500億円"
+  },
+  "九州旅客鉄道株式会社": {
+    "industry": "運輸",
+    "revenue_size": "1000億円以上"
+  },
+  "三菱ＵＦＪニコス株式会社": {
+    "industry": "金融",
+    "revenue_size": "1000億円以上"
+  },
+  "ロート製薬株式会社": {
+    "industry": "製造業",
+    "revenue_size": "1000億円以上"
+  },
+  "日精機工株式会社": {
+    "industry": "製造業",
+    "revenue_size": "100億～500億円"
+  },
+  "株式会社ソラスト": {
+    "industry": "IT",
+    "revenue_size": "100億～500億円"
+  },
+  "NTN株式会社": {
+    "industry": "製造業",
+    "revenue_size": "1000億円以上"
+  },
+  "東レ・メディカル株式会社": {
+    "industry": "製造業",
+    "revenue_size": "500億～1000億円"
+  },
+  "光洋機械産業株式会社": {
+    "industry": "製造業",
+    "revenue_size": "100億～500億円"
+  },
+  "帝都自動車交通株式会社": {
+    "industry": "運輸",
+    "revenue_size": "100億～500億円"
+  },
+  "アポクリート株式会社": {
+    "industry": "小売",
+    "revenue_size": "100億～500億円"
+  },
+  "大同火災海上保険株式会社": {
+    "industry": "保険",
+    "revenue_size": "1000億円以上"
+  },
+  "石油資源開発株式会社": {
+    "industry": "エネルギー",
+    "revenue_size": "1000億円以上"
+  },
+  "日立造船マリンエンジン株式会社": {
+    "industry": "製造業",
+    "revenue_size": "500億～1000億円"
+  },
+  "ヤマトクレジットファイナンス株式会社": {
+    "industry": "金融",
+    "revenue_size": "100億～500億円"
+  },
+  "株式会社ライフドリンク カンパニー": {
+    "industry": "IT",
+    "revenue_size": "1000億円以上"
+  },
+  "三洋化成工業株式会社": {
+    "industry": "製造業",
+    "revenue_size": "100億～500億円"
+  },
+  "西華産業株式会社": {
+    "industry": "商社",
+    "revenue_size": "100億～500億円"
+  },
+  "目黒区": {
+    "industry": "IT",
+    "revenue_size": "100億～500億円"
+  },
+  "AGS グループ": {
+    "industry": "IT",
+    "revenue_size": "1000億円以上"
+  },
+  "株式会社ジョイフルエーケー": {
+    "industry": "IT",
+    "revenue_size": "100億～500億円"
+  },
+  "太陽化学株式会社": {
+    "industry": "製造業",
+    "revenue_size": "100億～500億円"
+  },
+  "大阪府四條畷市": {
+    "industry": "地方公共団体",
+    "revenue_size": "100億円未満"
+  },
+  "株式会社アイセイ薬局": {
+    "industry": "IT",
+    "revenue_size": "1000億円以上"
+  },
+  "株式会社システック": {
+    "industry": "IT",
+    "revenue_size": "100億～500億円"
+  },
+  "東北電力株式会社": {
+    "industry": "エネルギー",
+    "revenue_size": "1000億円以上"
+  },
+  "三菱マテリアル株式会社": {
+    "industry": "製造業",
+    "revenue_size": "1000億円以上"
+  },
+  "北海道エネルギー株式会社": {
+    "industry": "エネルギー",
+    "revenue_size": "100億～500億円"
+  },
+  "株式会社日本触媒": {
+    "industry": "IT",
+    "revenue_size": "100億～500億円"
+  },
+  "オリックス生命保険株式会社": {
+    "industry": "保険",
+    "revenue_size": "1000億円以上"
+  },
+  "I＆H株式会社": {
+    "industry": "IT",
+    "revenue_size": "100億～500億円"
+  },
+  "大日本除虫菊株式会社": {
+    "industry": "製造業",
+    "revenue_size": "100億～500億円"
+  },
+  "帝人エンジニアリング株式会社": {
+    "industry": "製造業",
+    "revenue_size": "500億～1000億円"
+  },
+  "東洋鋼鈑株式会社": {
+    "industry": "製造業",
+    "revenue_size": "1000億円以上"
+  },
+  "株式会社エスイー": {
+    "industry": "IT",
+    "revenue_size": "1000億円以上"
+  },
+  "トヨタファイナンス株式会社": {
+    "industry": "金融",
+    "revenue_size": "1000億円以上"
+  },
+  "ＳＯＭＰＯホールディングス株式会社": {
+    "industry": "保険",
+    "revenue_size": "1000億円以上"
+  },
+  "株式会社フォーバルテレコム": {
+    "industry": "通信",
+    "revenue_size": "100億～500億円"
+  },
+  "兼松株式会社": {
+    "industry": "商社",
+    "revenue_size": "1000億円以上"
+  },
+  "阿爾卑斯系統集成（大連）有限公司": {
+    "industry": "IT",
+    "revenue_size": "100億～500億円"
+  },
+  "株式会社ニシヤマ": {
+    "industry": "商社",
+    "revenue_size": "100億～500億円"
+  },
+  "株式会社 日立ICTビジネスサービス": {
+    "industry": "IT",
+    "revenue_size": "1000億円以上"
+  },
+  "NECネクサソリューションズ株式会社": {
+    "industry": "IT",
+    "revenue_size": "1000億円以上"
+  },
+  "伊藤超短波株式会社": {
+    "industry": "製造業",
+    "revenue_size": "100億円未満"
+  },
+  "東電化（中国）投資有限公司": {
+    "industry": "製造業",
+    "revenue_size": "100億～500億円"
+  },
+  "佳能光学設備": {
+    "industry": "製造業",
+    "revenue_size": "100億～500億円"
+  },
+  "アットホーム株式会社": {
+    "industry": "不動産",
+    "revenue_size": "1000億円以上"
+  },
+  "トーソー株式会社": {
+    "industry": "製造業",
+    "revenue_size": "100億～500億円"
+  },
+  "株式会社ATビジネス": {
+    "industry": "サービス",
+    "revenue_size": "100億～500億円"
+  },
+  "株式会社吉田製作所": {
+    "industry": "IT",
+    "revenue_size": "1000億円以上"
+  },
+  "東日本電信電話株式会社（本社）": {
+    "industry": "通信",
+    "revenue_size": "1000億円以上"
+  },
+  "中部国際空港株式会社": {
+    "industry": "運輸",
+    "revenue_size": "100億～500億円"
+  },
+  "北京蒲蒲蘭文化発展有限公司": {
+    "industry": "小売",
+    "revenue_size": "100億円未満"
+  },
+  "タイ・エアアジア（Thai AirAsia）": {
+    "industry": "運輸",
+    "revenue_size": "100億～500億円"
+  },
+  "日本特殊陶業株式会社": {
+    "industry": "製造業",
+    "revenue_size": "1000億円以上"
+  },
+  "西武鉄道株式会社": {
+    "industry": "運輸",
+    "revenue_size": "1000億円以上"
+  },
+  "全日本空輸株式会社": {
+    "industry": "運輸",
+    "revenue_size": "1000億円以上"
+  },
+  "ぺんてる株式会社": {
+    "industry": "製造業",
+    "revenue_size": "100億～500億円"
+  },
+  "株式会社b-ex(旧:株式会社ビューティーエクスペリエンス)": {
+    "industry": "サービス",
+    "revenue_size": "100億～500億円"
+  },
+  "株式会社はくばく": {
+    "industry": "IT",
+    "revenue_size": "100億～500億円"
+  },
+  "森ビル株式会社": {
+    "industry": "不動産",
+    "revenue_size": "1000億円以上"
+  },
+  "伊藤忠商事": {
+    "industry": "商社",
+    "revenue_size": "1000億円以上"
+  },
+  "ヤフー株式会社Yahoo Japan Corporation": {
+    "industry": "IT",
+    "revenue_size": "1000億円以上"
+  },
+  "石川県": {
+    "industry": "地方公共団体",
+    "revenue_size": "1000億円以上"
+  },
+  "四川省成都市": {
+    "industry": "IT",
+    "revenue_size": "100億円未満"
+  },
+  "川崎重工業株式会社　プラント・環境カンパニー": {
+    "industry": "製造業",
+    "revenue_size": "1000億円以上"
+  },
+  "PT. ASURANSI TOKIO MARINE INDONESIA": {
+    "industry": "保険",
+    "revenue_size": "100億～500億円"
+  },
+  "イオンアイビス株式会社": {
+    "industry": "IT",
+    "revenue_size": "1000億円以上"
+  },
+  "株式会社明電舎": {
+    "industry": "製造業",
+    "revenue_size": "1000億円以上"
+  },
+  "株式会社NTTファシリティーズ": {
+    "industry": "サービス",
+    "revenue_size": "1000億円以上"
+  },
+  "伊藤忠商事株式会社": {
+    "industry": "商社",
+    "revenue_size": "1000億円以上"
+  },
+  "トッパン・フォームズ株式会社": {
+    "industry": "製造業",
+    "revenue_size": "1000億円以上"
+  },
+  "株式会社オプテージ(旧:株式会社ケイ・オプティコム)": {
+    "industry": "IT",
+    "revenue_size": "1000億円以上"
+  },
+  "エイチアールワン株式会社": {
+    "industry": "IT",
+    "revenue_size": "100億～500億円"
+  },
+  "三菱電機ビルテクノサービス株式会社": {
+    "industry": "サービス",
+    "revenue_size": "500億～1000億円"
+  },
+  "ブラザー工業株式会社": {
+    "industry": "製造業",
+    "revenue_size": "1000億円以上"
+  },
+  "地盤ネットホールディングス株式会社": {
+    "industry": "建設",
+    "revenue_size": "100億～500億円"
+  },
+  "株式会社資生堂": {
+    "industry": "製造業",
+    "revenue_size": "1000億円以上"
+  },
+  "学校法人千葉工業大学": {
+    "industry": "教育",
+    "revenue_size": "100億円未満"
+  },
+  "株式会社トヨテック": {
+    "industry": "IT",
+    "revenue_size": "100億～500億円"
+  },
+  "株式会社三菱総合研究所": {
+    "industry": "IT",
+    "revenue_size": "1000億円以上"
+  },
+  "株式会社理経": {
+    "industry": "IT",
+    "revenue_size": "100億～500億円"
+  },
+  "株式会社NTTデータMSE": {
+    "industry": "IT",
+    "revenue_size": "100億～500億円"
+  },
+  "さくら情報システム株式会社": {
+    "industry": "IT",
+    "revenue_size": "100億～500億円"
+  },
+  "アルプス システム インテグレーション株式会社": {
+    "industry": "IT",
+    "revenue_size": "1000億円以上"
+  },
+  "ジャパンシステム株式会社": {
+    "industry": "IT",
+    "revenue_size": "100億～500億円"
+  },
+  "赤城乳業株式会社": {
+    "industry": "製造業",
+    "revenue_size": "100億～500億円"
+  },
+  "日立マネジメントパートナー": {
+    "industry": "サービス",
+    "revenue_size": "1000億円以上"
+  },
+  "株式会社アンデルセンサービス": {
+    "industry": "サービス",
+    "revenue_size": "100億～500億円"
+  },
+  "NTTコミュニケーションズ株式会社": {
+    "industry": "通信",
+    "revenue_size": "1000億円以上"
+  }
+}

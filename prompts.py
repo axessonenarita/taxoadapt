@@ -21,7 +21,15 @@ dimension_definitions = {
     'methodologies': """Methodology: a paper that introduces, explains, or refines a method or approach, providing theoretical foundations, implementation details, and empirical evaluations to advance the state-of-the-art or solve specific problems.""",
     'datasets': """Datasets: introduces a new dataset, detailing its creation, structure, and intended use, while providing analysis or benchmarks to demonstrate its relevance and utility. It focuses on advancing research by addressing gaps in existing datasets/performance of SOTA models or enabling new applications in the field.""",
     'evaluation_methods': """Evaluation Methods: a paper that assesses the performance, limitations, or biases of models, methods, or datasets using systematic experiments or analyses. It focuses on benchmarking, comparative studies, or proposing new evaluation metrics or frameworks to provide insights and improve understanding in the field.""",
-    'real_world_domains': """Real-World Domains: demonstrates the use of techniques to solve specific, real-world problems or address specific domain challenges. It focuses on practical implementation, impact, and insights gained from applying methods in various contexts. Examples include: product recommendation systems, medical record summarization, etc."""
+    'real_world_domains': """Real-World Domains: demonstrates the use of techniques to solve specific, real-world problems or address specific domain challenges. It focuses on practical implementation, impact, and insights gained from applying methods in various contexts. Examples include: product recommendation systems, medical record summarization, etc.""",
+    # Business case study dimensions
+    '業種': """業種: 企業の業種・業界カテゴリ（不動産、製造業、金融、小売、IT、建設、運輸、卸売、サービス、医療、教育、食品、化学、機械、電気、通信、エネルギー、鉄鋼、非鉄金属、繊維、パルプ、ガラス、セラミックス、商社、保険、証券、銀行など）。Web検索で調査した結果を参照するが、事例の内容からも判断可能。""",
+    '業務領域': """業務領域: 導入したシステムが対応する業務領域（経理、人事、営業、調達、購買、販売、在庫管理、顧客管理、プロジェクト管理、ワークフロー、決裁、契約管理、経費精算、勤怠管理、文書管理、情報共有など）。事例の内容から判断する。""",
+    '導入効果': """導入効果: システム導入により得られた効果・成果（業務効率化、コスト削減、ペーパーレス化、作業時間削減、属人化解消、データ活用促進、意思決定の迅速化、顧客満足度向上、品質向上、ガバナンス強化など）。事例の内容から判断する。""",
+    '技術領域': """技術領域: 使用された技術・ソリューションの種類（ワークフロー、RPA、ローコード開発、クラウド、オンプレミス、OCR、AI、機械学習、データ分析、API連携、モバイル対応、BIツールなど）。事例の内容から判断する。""",
+    '導入形態': """導入形態: システム導入の形態（クラウド、オンプレミス、ハイブリッド、SaaS、PaaS、IaaS、パッケージ、カスタマイズ、スクラッチ開発、ローコード開発など）。事例の内容から判断する。""",
+    '業務課題': """業務課題: システム導入により解決した業務課題（属人化、ペーパーレス化、システム統合、データ分散、業務効率の低下、承認プロセスの複雑化、情報共有の不足、レガシーシステムの老朽化、コスト増加、品質管理の困難など）。事例の内容から判断する。""",
+    '会社規模': """会社規模: 導入企業の売上規模（1000億円以上、500億～1000億円、100億～500億円、100億円未満）。Web検索で調査した結果を参照するが、事例の内容からも推測可能。"""
     }
 
 # bio
@@ -43,7 +51,15 @@ node_dimension_definitions = {
     'methodologies': """Types of techniques, models, or approaches used to address various challenges, including algorithmic innovations, frameworks, and optimization strategies.""",
     'datasets': """Types of methods to structure data collections used in research, including ways to curate or analyze datasets, detailing their properties, intended use, and role in advancing the field.""",
     'evaluation_methods': """Types of methods for assessing the performance of models, datasets, or techniques, including new metrics, benchmarking techniques, or comparative performance studies.""",
-    'real_world_domains': """Types of practical or industry-specific domains in which techniques and methodologies can be applied, exploring implementation, impact, and challenges of real-world problems."""
+    'real_world_domains': """Types of practical or industry-specific domains in which techniques and methodologies can be applied, exploring implementation, impact, and challenges of real-world problems.""",
+    # Business case study dimensions
+    '業種': """企業の業種・業界カテゴリを定義し分類する。不動産、製造業、金融、小売、IT、建設、運輸、卸売、サービス、医療、教育、食品、化学、機械、電気、通信、エネルギー、鉄鋼、非鉄金属、繊維、パルプ、ガラス、セラミックス、商社、保険、証券、銀行などの業種カテゴリを含む。""",
+    '業務領域': """導入したシステムが対応する業務領域を定義し分類する。経理、人事、営業、調達、購買、販売、在庫管理、顧客管理、プロジェクト管理、ワークフロー、決裁、契約管理、経費精算、勤怠管理、文書管理、情報共有などの業務領域を含む。""",
+    '導入効果': """システム導入により得られた効果・成果を定義し分類する。業務効率化、コスト削減、ペーパーレス化、作業時間削減、属人化解消、データ活用促進、意思決定の迅速化、顧客満足度向上、品質向上、ガバナンス強化などの効果を含む。""",
+    '技術領域': """使用された技術・ソリューションの種類を定義し分類する。ワークフロー、RPA、ローコード開発、クラウド、オンプレミス、OCR、AI、機械学習、データ分析、API連携、モバイル対応、BIツールなどの技術領域を含む。""",
+    '導入形態': """システム導入の形態を定義し分類する。クラウド、オンプレミス、ハイブリッド、SaaS、PaaS、IaaS、パッケージ、カスタマイズ、スクラッチ開発、ローコード開発などの導入形態を含む。""",
+    '業務課題': """システム導入により解決した業務課題を定義し分類する。属人化、ペーパーレス化、システム統合、データ分散、業務効率の低下、承認プロセスの複雑化、情報共有の不足、レガシーシステムの老朽化、コスト増加、品質管理の困難などの課題を含む。""",
+    '会社規模': """導入企業の売上規模を定義し分類する。1000億円以上、500億～1000億円、100億～500億円、100億円未満の4つのカテゴリに分類する。"""
 }
 # node_dimension_definitions = {
 #     'experimental_methods': """Types of experimental techniques, protocols, laboratory procedures, or biological assays introduced or significantly refined, detailing their design, validation, and implementation to improve accuracy, reproducibility, or effectiveness in biological research.""",
@@ -97,6 +113,20 @@ Paper types (type:definition):
 5. Real-World Domains: demonstrates the use of techniques to solve specific, real-world problems or address specific domain challenges. It focuses on practical implementation, impact, and insights gained from applying methods in various contexts. Examples include: product recommendation systems, medical record summarization, etc.
 """
 
+# Business case study system instruction
+business_type_cls_system_instruction = """あなたは導入事例を複数のディメンションで分類する多ラベル分類アシスタントです。各事例は複数のディメンションに該当する可能性があります。
+
+ディメンション（dimension:定義）:
+
+1. 業種: 企業の業種・業界カテゴリ（不動産、製造業、金融、小売、IT、建設、運輸、卸売、サービス、医療、教育、食品、化学、機械、電気、通信、エネルギー、鉄鋼、非鉄金属、繊維、パルプ、ガラス、セラミックス、商社、保険、証券、銀行など）。事例の内容から判断し、該当する場合はTrueを返す。
+2. 業務領域: 導入したシステムが対応する業務領域（経理、人事、営業、調達、購買、販売、在庫管理、顧客管理、プロジェクト管理、ワークフロー、決裁、契約管理、経費精算、勤怠管理、文書管理、情報共有など）。事例の内容から判断し、該当する場合はTrueを返す。
+3. 導入効果: システム導入により得られた効果・成果（業務効率化、コスト削減、ペーパーレス化、作業時間削減、属人化解消、データ活用促進、意思決定の迅速化、顧客満足度向上、品質向上、ガバナンス強化など）。事例の内容から判断し、該当する場合はTrueを返す。
+4. 技術領域: 使用された技術・ソリューションの種類（ワークフロー、RPA、ローコード開発、クラウド、オンプレミス、OCR、AI、機械学習、データ分析、API連携、モバイル対応、BIツールなど）。事例の内容から判断し、該当する場合はTrueを返す。
+5. 導入形態: システム導入の形態（クラウド、オンプレミス、ハイブリッド、SaaS、PaaS、IaaS、パッケージ、カスタマイズ、スクラッチ開発、ローコード開発など）。事例の内容から判断し、該当する場合はTrueを返す。
+6. 業務課題: システム導入により解決した業務課題（属人化、ペーパーレス化、システム統合、データ分散、業務効率の低下、承認プロセスの複雑化、情報共有の不足、レガシーシステムの老朽化、コスト増加、品質管理の困難など）。事例の内容から判断し、該当する場合はTrueを返す。
+7. 会社規模: 導入企業の売上規模（1000億円以上、500億～1000億円、100億～500億円、100億円未満）。事例の内容から推測可能な場合、または明示的に記載されている場合はTrueを返す。
+"""
+
 # type_cls_system_instruction = """You are a helpful multi-label classification assistant which helps me label papers based on their paper type. They may be more than one.
 
 # Paper types (type:definition):
@@ -114,6 +144,16 @@ class TypeClsSchema(BaseModel):
   datasets: bool
   evaluation_methods: bool
   real_world_domains: bool
+
+# Business case study schema
+class BusinessTypeClsSchema(BaseModel):
+  業種: bool
+  業務領域: bool
+  導入効果: bool
+  技術領域: bool
+  導入形態: bool
+  業務課題: bool
+  会社規模: bool
 
 # class TypeClsSchema(BaseModel):
 #   experimental_methods: bool
@@ -135,6 +175,34 @@ Your output should be in the following JSON format:
   "datasets": <return True if the paper is a Dataset paper, False otherwise>,
   "evaluation_methods": <return True if the paper is an Evaluation paper, False otherwise>,
   "real_world_domains": <return True if the paper is a Real-World Domain/Application paper, False otherwise>,
+}}
+"""
+   return out
+
+# Business case study main prompt
+def business_type_cls_main_prompt(paper):
+   company_info = ""
+   if hasattr(paper, 'company_name') and paper.company_name:
+       company_info = f'\n"Company": "{paper.company_name}"'
+       if hasattr(paper, 'company_industry') and paper.company_industry:
+           company_info += f'\n"Industry": "{paper.company_industry}"'
+       if hasattr(paper, 'company_revenue_size') and paper.company_revenue_size:
+           company_info += f'\n"RevenueSize": "{paper.company_revenue_size}"'
+   
+   out = f"""以下の導入事例のタイトルと本文を読み、該当するディメンションをすべて出力してください。
+
+"Title": "{paper.title}"
+"Abstract": "{paper.abstract[:5000]}"{company_info}
+
+出力は以下のJSON形式で行ってください:
+{{
+  "業種": <事例が業種に関する情報を含む場合はTrue、そうでなければFalse>,
+  "業務領域": <事例が業務領域に関する情報を含む場合はTrue、そうでなければFalse>,
+  "導入効果": <事例が導入効果に関する情報を含む場合はTrue、そうでなければFalse>,
+  "技術領域": <事例が技術領域に関する情報を含む場合はTrue、そうでなければFalse>,
+  "導入形態": <事例が導入形態に関する情報を含む場合はTrue、そうでなければFalse>,
+  "業務課題": <事例が業務課題に関する情報を含む場合はTrue、そうでなければFalse>,
+  "会社規模": <事例が会社規模に関する情報を含む場合、または推測可能な場合はTrue、そうでなければFalse>
 }}
 """
    return out

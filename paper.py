@@ -5,6 +5,10 @@ class Paper:
         self.abstract = abstract
         self.labels = {l:[] for l in label_opts}
         self.internal = internal
+        # 会社情報（casestudy用）
+        self.company_name = None
+        self.company_industry = None
+        self.company_revenue_size = None
 
     def add_label(self, label, dim):
         self.labels[dim].append(label)
