@@ -154,13 +154,18 @@ class Node:
             main_prompt = classify_prompt(self, paper).replace(init_classify_prompt + '\n\n', '')
             prompts.append(constructPrompt(args, init_classify_prompt, main_prompt))
 
-            output = promptLLM(args, prompts, schema=ClassifySchema, max_new_tokens=3000, json_mode=True)
+        # すべてのプロンプトを一度に処理
+        output = promptLLM(args, prompts, schema=ClassifySchema, max_new_tokens=3000, json_mode=True)
         output_dict = [json.loads(clean_json_string(c)) if "```" in c else json.loads(c.strip()) for c in output]
         class_options = [c for c in self.get_children()]
         class_map = {c:0 for c in self.get_children()}
         class_map['unlabeled'] = 0
 
+        # 子ノードに分類された論文を追跡（親ノードから削除するため）
+        papers_to_remove = set()
+
         for (paper_id, paper), out_labels in zip(self.papers.items(), output_dict):
+            classified_to_child = False
             if (len(out_labels['class_labels']) == 0) or ("None" in out_labels['class_labels']):
                 class_map['unlabeled'] += 1
                 continue
@@ -173,8 +178,18 @@ class Node:
                     label2node[full_label].papers[paper_id] = paper
                     class_map[label] += 1
                     paper.labels[self.dimension].append(label)
+                    classified_to_child = True
                 else:
                     class_map['unlabeled'] += 1
+            
+            # 子ノードに分類された論文は親ノードから削除
+            if classified_to_child:
+                papers_to_remove.add(paper_id)
+        
+        # 親ノードから子ノードに分類された論文を削除
+        for paper_id in papers_to_remove:
+            if paper_id in self.papers:
+                del self.papers[paper_id]
         
         print(f'classification: {str(class_map)}')
         return output_dict
@@ -211,7 +226,7 @@ class Node:
         print(f"{indent}Source: {'Initial' if self.source is None else self.source}")
 
         if len(self.papers) > 0:
-            example_papers = [(p.id, unidecode(p.title)) for p in self.papers.values()]
+            example_papers = [(p.id, p.title) for p in self.papers.values()]
             output_dict['example_papers'] = example_papers[:10]
             output_dict['paper_ids'] = list(self.papers.keys())
 

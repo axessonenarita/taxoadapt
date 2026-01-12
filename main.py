@@ -35,7 +35,7 @@ from model_definitions import initializeLLM, promptLLM, constructPrompt
 from prompts import (multi_dim_prompt, NodeListSchema, type_cls_system_instruction, type_cls_main_prompt, TypeClsSchema,
                      business_type_cls_system_instruction, business_type_cls_main_prompt, BusinessTypeClsSchema)
 from taxonomy import Node, DAG
-from expansion import expandNodeWidth, expandNodeDepth
+from expansion import expandNodeWidth, expandNodeDepth, shouldExpandWidthWithLLM
 from paper import Paper
 from utils import clean_json_string
 from tools.markdown_utils import extract_metadata_from_markdown
@@ -290,6 +290,11 @@ def main(args):
     if args.dataset == 'casestudy':
         # 業種と会社規模は既存データがあるため、幅方向展開をスキップ
         skip_width_expansion_dims = {'業種', '会社規模'}
+    
+    # 会社規模は深さ方向展開もスキップ
+    skip_depth_expansion_dims = set()
+    if args.dataset == 'casestudy':
+        skip_depth_expansion_dims = {'会社規模'}
 
     while queue:
         curr_node = queue.popleft()
@@ -319,6 +324,18 @@ def main(args):
                 else:
                     new_sibs = []
                     print(f'(WIDTH EXPANSION SKIPPED) {curr_node.label} ({curr_node.dimension}) has {unlabeled_count} unlabeled papers (threshold: {args.max_density}), skipping width expansion')
+            
+            # 業務課題などの特定ディメンションでは、未分類論文が少なくてもLLMに判断を委ねる
+            llm_judgment_dims = {'業務課題'}  # LLM判断を適用するディメンション
+            if curr_node.dimension in llm_judgment_dims and len(new_sibs) == 0:
+                # 未分類論文が少ない場合でも、LLMに判断を委ねる
+                should_expand, reasoning = shouldExpandWidthWithLLM(args, curr_node, id2node, label2node)
+                if should_expand:
+                    print(f'(WIDTH EXPANSION - LLM JUDGMENT) {curr_node.label} ({curr_node.dimension}): {reasoning}')
+                    new_sibs = expandNodeWidth(args, curr_node, id2node, label2node)
+                    print(f'(WIDTH EXPANSION) new children for {curr_node.label} ({curr_node.dimension}) are: {str((new_sibs))}')
+                else:
+                    print(f'(WIDTH EXPANSION SKIPPED - LLM JUDGMENT) {curr_node.label} ({curr_node.dimension}): {reasoning}')
 
             # re-classify and re-do process if necessary
             if len(new_sibs) > 0:
@@ -330,6 +347,10 @@ def main(args):
                 if (child_node.level < args.max_depth) and (len(c_papers) > args.max_density):
                     queue.append(child_node)
         else:
+            # 会社規模の場合は深さ方向展開をスキップ
+            if curr_node.dimension in skip_depth_expansion_dims:
+                print(f'(DEPTH EXPANSION SKIPPED) {curr_node.label} ({curr_node.dimension}) - skipping depth expansion')
+                continue
             # no children -> perform depth expansion
             new_children, success = expandNodeDepth(args, curr_node, id2node, label2node)
             # args.llm = 'vllm'  # GPTを使用する場合はコメントアウト

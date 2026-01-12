@@ -10,8 +10,44 @@ from utils import clean_json_string
 from model_definitions import constructPrompt, promptLLM
 from prompts import width_system_instruction, width_main_prompt, WidthExpansionSchema, width_cluster_system_instruction, width_cluster_main_prompt, WidthClusterListSchema
 from prompts import depth_system_instruction, depth_main_prompt, DepthExpansionSchema, depth_cluster_system_instruction, depth_cluster_main_prompt, DepthClusterListSchema
+from prompts import width_expansion_judgment_system_instruction, width_expansion_judgment_prompt, WidthExpansionJudgmentSchema
 
 ######################## WIDTH EXPANSION ########################
+
+def shouldExpandWidthWithLLM(args, node, id2node, label2node):
+    """LLMに判断を委ねて、幅方向展開が必要かどうかを判断する"""
+    # 既存の子ノードに分類された論文からサンプルを取得（最大10件）
+    classified_papers = {}
+    for idx, p in node.papers.items():
+        for c in node.children.values():
+            if idx in c.papers:
+                classified_papers[idx] = p
+                break
+        if len(classified_papers) >= 10:
+            break
+    
+    if len(classified_papers) == 0:
+        return False, "分類済み論文がないため、判断不可"
+    
+    node_ancestors = node.get_ancestors()
+    if node_ancestors is None:
+        ancestors = "None"
+    else:
+        node_ancestors.reverse()
+        ancestors = " -> ".join([ancestor.label for ancestor in node_ancestors])
+    
+    judgment_prompt = [constructPrompt(args, width_expansion_judgment_system_instruction, 
+                                       width_expansion_judgment_prompt(node, classified_papers, node.children, nl='\n'))]
+    judgment_output = promptLLM(args=args, prompts=judgment_prompt, schema=WidthExpansionJudgmentSchema, 
+                                max_new_tokens=500, json_mode=True, temperature=0.3, top_p=0.9)[0]
+    judgment_result = json.loads(clean_json_string(judgment_output)) if "```" in judgment_output else json.loads(judgment_output.strip())
+    
+    should_expand = judgment_result.get('should_expand', False)
+    reasoning = judgment_result.get('reasoning', '')
+    
+    print(f'LLM判断: should_expand={should_expand}, reasoning={reasoning}')
+    return should_expand, reasoning
+
 
 def expandNodeWidth(args, node, id2node, label2node):
     unlabeled_papers = {}
