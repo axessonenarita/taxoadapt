@@ -41,6 +41,218 @@ from utils import clean_json_string
 from tools.markdown_utils import extract_metadata_from_markdown
 
 
+def serialize_nodes(roots, id2node, label2node):
+    """ノード構造をシリアライズ"""
+    nodes_data = {}
+    root_ids = {}
+    
+    # すべてのノードを収集
+    visited_nodes = set()
+    nodes_to_visit = list(id2node.values())
+    
+    while nodes_to_visit:
+        node = nodes_to_visit.pop()
+        if node.id in visited_nodes:
+            continue
+        visited_nodes.add(node.id)
+        
+        # 親ノードのIDリスト
+        parent_ids = [p.id for p in node.parents]
+        # 子ノードのラベルリスト（children辞書のキー）
+        child_labels = list(node.children.keys())
+        
+        nodes_data[str(node.id)] = {
+            'id': node.id,
+            'label': node.label,
+            'dimension': node.dimension,
+            'description': node.description,
+            'level': node.level,
+            'source': node.source,
+            'parent_ids': parent_ids,
+            'child_labels': child_labels
+        }
+        
+        # 子ノードも追加
+        nodes_to_visit.extend(node.children.values())
+    
+    # ルートノードのIDを保存
+    for dim, root in roots.items():
+        root_ids[dim] = root.id
+    
+    return {
+        'nodes': nodes_data,
+        'root_ids': root_ids,
+        'label2node': {label: node_id for label, node_id in [(l, n.id) for l, n in label2node.items()]}
+    }
+
+
+def deserialize_nodes(nodes_dict, root_ids, label2node_data):
+    """ノード構造をデシリアライズ"""
+    from taxonomy import Node
+    
+    id2node = {}
+    label2node = {}
+    roots = {}
+    
+    # まずすべてのノードオブジェクトを作成
+    for node_id_str, node_info in nodes_dict.items():
+        node_id = int(node_id_str)
+        node = Node(
+            id=node_info['id'],
+            label=node_info['label'],
+            dimension=node_info['dimension'],
+            description=node_info.get('description'),
+            source=node_info.get('source')
+        )
+        node.level = node_info.get('level', 0)
+        id2node[node_id] = node
+    
+    # 親子関係を構築
+    for node_id_str, node_info in nodes_dict.items():
+        node_id = int(node_id_str)
+        node = id2node[node_id]
+        
+        # 親ノードを設定
+        for parent_id in node_info['parent_ids']:
+            if parent_id in id2node:
+                node.add_parent(id2node[parent_id])
+        
+        # 子ノードを設定
+        for child_label in node_info['child_labels']:
+            # 子ノードを検索（labelとdimensionから）
+            full_label = child_label + f"_{node.dimension}"
+            if full_label in label2node_data:
+                child_id = label2node_data[full_label]
+                if child_id in id2node:
+                    node.add_child(child_label, id2node[child_id])
+    
+    # label2nodeを構築
+    for label, node_id in label2node_data.items():
+        if node_id in id2node:
+            label2node[label] = id2node[node_id]
+    
+    # ルートノードを設定
+    for dim, root_id in root_ids.items():
+        if root_id in id2node:
+            roots[dim] = id2node[root_id]
+    
+    return roots, id2node, label2node
+
+
+def save_checkpoint(args, roots, id2node, label2node, visited, queue, iteration_count):
+    """チェックポイントを保存"""
+    checkpoint_file = f'{args.data_dir}/checkpoint.json'
+    
+    # ノード構造をシリアライズ
+    nodes_structure = serialize_nodes(roots, id2node, label2node)
+    
+    checkpoint_data = {
+        'iteration_count': iteration_count,
+        'visited': list(visited),
+        'queue': [
+            {
+                'node_id': node.id,
+                'dimension': node.dimension,
+                'label': node.label
+            }
+            for node in queue
+        ],
+        'node_papers': {
+            str(node_id): list(node.papers.keys())
+            for node_id, node in id2node.items()
+            if len(node.papers) > 0
+        },
+        'nodes_structure': nodes_structure,
+        'paper_dimension_labels': {}  # 論文のディメンション分類結果を保存
+    }
+    
+    # 論文のディメンション分類結果を保存（STEP 3の結果）
+    for dim, root in roots.items():
+        if len(root.papers) > 0:
+            checkpoint_data['paper_dimension_labels'][dim] = list(root.papers.keys())
+    
+    with open(checkpoint_file, 'w', encoding='utf-8') as f:
+        json.dump(checkpoint_data, f, ensure_ascii=False, indent=2)
+    print(f"チェックポイントを保存しました: {checkpoint_file}")
+
+
+def load_checkpoint(args, internal_collection):
+    """チェックポイントを読み込み（ノード構造も含む）"""
+    checkpoint_file = f'{args.data_dir}/checkpoint.json'
+    if not os.path.exists(checkpoint_file):
+        return None
+    
+    print(f"チェックポイントを読み込み中: {checkpoint_file}")
+    with open(checkpoint_file, 'r', encoding='utf-8') as f:
+        checkpoint_data = json.load(f)
+    
+    visited = set(checkpoint_data['visited'])
+    iteration_count = checkpoint_data['iteration_count']
+    
+    # ノード構造を復元
+    nodes_structure = checkpoint_data.get('nodes_structure')
+    if nodes_structure:
+        roots, id2node, label2node = deserialize_nodes(
+            nodes_structure['nodes'],
+            nodes_structure['root_ids'],
+            nodes_structure['label2node']
+        )
+    else:
+        # 旧形式のチェックポイントの場合はNoneを返す
+        print("警告: 旧形式のチェックポイントです。ノード構造が保存されていないため、通常モードで実行します。")
+        return None
+    
+    # 論文の割り当てを復元
+    node_papers = checkpoint_data.get('node_papers', {})
+    for node_id_str, paper_ids in node_papers.items():
+        node_id = int(node_id_str)
+        if node_id in id2node:
+            node = id2node[node_id]
+            node.papers = {}
+            # internal_collectionから論文オブジェクトを取得して割り当て
+            for paper_id in paper_ids:
+                if paper_id in internal_collection:
+                    node.papers[paper_id] = internal_collection[paper_id]
+                    # 論文のラベルも復元
+                    if not hasattr(internal_collection[paper_id], 'labels'):
+                        internal_collection[paper_id].labels = {}
+                    if node.dimension not in internal_collection[paper_id].labels:
+                        internal_collection[paper_id].labels[node.dimension] = []
+                    if node.label not in internal_collection[paper_id].labels[node.dimension]:
+                        internal_collection[paper_id].labels[node.dimension].append(node.label)
+    
+    # 論文のディメンション分類結果を復元（STEP 3の結果）
+    paper_dimension_labels = checkpoint_data.get('paper_dimension_labels', {})
+    for dim, paper_ids in paper_dimension_labels.items():
+        if dim in roots:
+            roots[dim].papers = {}
+            for paper_id in paper_ids:
+                if paper_id in internal_collection:
+                    roots[dim].papers[paper_id] = internal_collection[paper_id]
+    
+    # queueを復元
+    queue = deque()
+    for queue_item in checkpoint_data.get('queue', []):
+        node_id = queue_item['node_id']
+        if node_id in id2node:
+            queue.append(id2node[node_id])
+        else:
+            # ノードが見つからない場合は、dimensionとlabelから検索
+            full_label = queue_item['label'].replace(' ', '_').lower() + f"_{queue_item['dimension']}"
+            if full_label in label2node:
+                queue.append(label2node[full_label])
+    
+    print(f"チェックポイントから復元: iteration={iteration_count}, visited={len(visited)}ノード, queue={len(queue)}ノード")
+    return {
+        'roots': roots,
+        'id2node': id2node,
+        'label2node': label2node,
+        'visited': visited,
+        'queue': queue,
+        'iteration_count': iteration_count
+    }
+
+
 def construct_dataset(args):
     if not os.path.exists(args.data_dir):
         os.makedirs(args.data_dir)
@@ -207,82 +419,111 @@ def initialize_DAG(args):
 
 
 def main(args):
-
-    print("######## STEP 1: LOAD IN DATASET ########")
-
-    internal_collection, internal_count = construct_dataset(args)
-    
-    print(f'Internal: {internal_count}')
-
-    # データサイズに応じてmax_densityを調整
-    if args.dataset == 'casestudy':
-        # 小規模データセットの場合は、データ数の10-15%程度を閾値にする
-        if internal_count < 200:
-            original_max_density = args.max_density
-            args.max_density = max(10, int(internal_count * 0.15))  # 97件なら約14件
-            print(f"Adjusted max_density from {original_max_density} to {args.max_density} for small dataset ({internal_count} papers)")
-
-    print("######## STEP 2: INITIALIZE DAG ########")
-    args = initializeLLM(args)
-
-    roots, id2node, label2node = initialize_DAG(args)
-
-    for dim in args.dimensions:
-        with open(f'{args.data_dir}/initial_taxo_{dim}.txt', 'w', encoding='utf-8') as f:
-            with redirect_stdout(f):
-                roots[dim].display(0, indent_multiplier=5)
-
-    print("######## STEP 3: CLASSIFY PAPERS BY DIMENSION (TASK, METHOD, DATASET, EVAL, APPLICATION, etc.) ########")
-
-    # args.llm = 'vllm'  # GPTを使用する場合はコメントアウト
-    dags = {dim:DAG(root=root, dim=dim) for dim, root in roots.items()}
-
-    # do for internal collection
-    # ビジネス向けかどうかでスキーマとプロンプトを切り替え
-    if args.dataset == 'casestudy':
-        system_instruction = business_type_cls_system_instruction
-        main_prompt_func = business_type_cls_main_prompt
-        schema = BusinessTypeClsSchema
-    else:
-        system_instruction = type_cls_system_instruction
-        main_prompt_func = type_cls_main_prompt
-        schema = TypeClsSchema
-
-    prompts = [constructPrompt(args, system_instruction, main_prompt_func(paper)) for paper in internal_collection.values()]
-    outputs = promptLLM(args=args, prompts=prompts, schema=schema, max_new_tokens=500, json_mode=True, temperature=0.1, top_p=0.99)
-    outputs = [json.loads(clean_json_string(c)) if "```" in c else json.loads(c.strip()) for c in outputs]
-
-    for r in roots:
-        roots[r].papers = {}
-    type_dist = {dim:[] for dim in args.dimensions}
-    for p_id, out in enumerate(outputs):
-        paper = internal_collection[p_id]
-        paper.labels = {}
+    # 再開モード: チェックポイントから状態を復元
+    if args.resume:
+        print("######## RESUMING FROM CHECKPOINT ########")
         
-        # 既存のIndustryとRevenueSizeタグがある場合は、業種と会社規模を自動的にTrueに設定
+        # STEP 1: データセットの読み込み（論文オブジェクトは必要）
+        print("######## STEP 1: LOAD IN DATASET (for paper objects) ########")
+        internal_collection, internal_count = construct_dataset(args)
+        print(f'Internal: {internal_count}')
+        
+        # チェックポイントから状態を復元
+        checkpoint_data = load_checkpoint(args, internal_collection)
+        if not checkpoint_data:
+            print("エラー: チェックポイントが見つかりません。通常モードで実行します。")
+            args.resume = False
+        else:
+            roots = checkpoint_data['roots']
+            id2node = checkpoint_data['id2node']
+            label2node = checkpoint_data['label2node']
+            visited = checkpoint_data['visited']
+            queue = checkpoint_data['queue']
+            iteration_count = checkpoint_data['iteration_count']
+            
+            # LLMの初期化
+            args = initializeLLM(args)
+            
+            print(f"チェックポイントから復元完了: iteration={iteration_count}, visited={len(visited)}ノード, queue={len(queue)}ノード")
+            print("STEP 1-3をスキップして、STEP 4から再開します。")
+    
+    # 通常モードまたはチェックポイントが見つからなかった場合
+    if not args.resume:
+        print("######## STEP 1: LOAD IN DATASET ########")
+
+        internal_collection, internal_count = construct_dataset(args)
+        
+        print(f'Internal: {internal_count}')
+
+        # データサイズに応じてmax_densityを調整
         if args.dataset == 'casestudy':
-            if hasattr(paper, 'company_industry') and paper.company_industry:
-                out['業種'] = True
-            if hasattr(paper, 'company_revenue_size') and paper.company_revenue_size:
-                out['会社規模'] = True
-        
-        for key, val in out.items():
-            if val:
-                type_dist[key].append(paper)
-                paper.labels[key] = []
-                roots[key].papers[p_id] = paper
-    
-    print(str({k:len(v) for k,v in type_dist.items()}))
+            # 小規模データセットの場合は、データ数の10-15%程度を閾値にする
+            if internal_count < 200:
+                original_max_density = args.max_density
+                args.max_density = max(10, int(internal_count * 0.15))  # 97件なら約14件
+                print(f"Adjusted max_density from {original_max_density} to {args.max_density} for small dataset ({internal_count} papers)")
 
+        print("######## STEP 2: INITIALIZE DAG ########")
+        args = initializeLLM(args)
+
+        roots, id2node, label2node = initialize_DAG(args)
+
+        for dim in args.dimensions:
+            with open(f'{args.data_dir}/initial_taxo_{dim}.txt', 'w', encoding='utf-8') as f:
+                with redirect_stdout(f):
+                    roots[dim].display(0, indent_multiplier=5)
+
+        print("######## STEP 3: CLASSIFY PAPERS BY DIMENSION (TASK, METHOD, DATASET, EVAL, APPLICATION, etc.) ########")
+
+        # args.llm = 'vllm'  # GPTを使用する場合はコメントアウト
+        dags = {dim:DAG(root=root, dim=dim) for dim, root in roots.items()}
+
+        # do for internal collection
+        # ビジネス向けかどうかでスキーマとプロンプトを切り替え
+        if args.dataset == 'casestudy':
+            system_instruction = business_type_cls_system_instruction
+            main_prompt_func = business_type_cls_main_prompt
+            schema = BusinessTypeClsSchema
+        else:
+            system_instruction = type_cls_system_instruction
+            main_prompt_func = type_cls_main_prompt
+            schema = TypeClsSchema
+
+        prompts = [constructPrompt(args, system_instruction, main_prompt_func(paper)) for paper in internal_collection.values()]
+        outputs = promptLLM(args=args, prompts=prompts, schema=schema, max_new_tokens=500, json_mode=True, temperature=0.1, top_p=0.99)
+        outputs = [json.loads(clean_json_string(c)) if "```" in c else json.loads(c.strip()) for c in outputs]
+
+        for r in roots:
+            roots[r].papers = {}
+        type_dist = {dim:[] for dim in args.dimensions}
+        for p_id, out in enumerate(outputs):
+            paper = internal_collection[p_id]
+            paper.labels = {}
+            
+            # 既存のIndustryとRevenueSizeタグがある場合は、業種と会社規模を自動的にTrueに設定
+            if args.dataset == 'casestudy':
+                if hasattr(paper, 'company_industry') and paper.company_industry:
+                    out['業種'] = True
+                if hasattr(paper, 'company_revenue_size') and paper.company_revenue_size:
+                    out['会社規模'] = True
+            
+            for key, val in out.items():
+                if val:
+                    type_dist[key].append(paper)
+                    paper.labels[key] = []
+                    roots[key].papers[p_id] = paper
+        
+        print(str({k:len(v) for k,v in type_dist.items()}))
+        
+        # 初期状態を設定
+        visited = set()
+        queue = deque([roots[r] for r in roots])
+        iteration_count = 0
 
     # for each node, classify its papers for the children or perform depth expansion
     print("######## STEP 4: ITERATIVELY CLASSIFY & EXPAND ########")
-
-    visited = set()
-    queue = deque([roots[r] for r in roots])
     
     # 途中経過保存用のカウンター
-    iteration_count = 0
     save_interval = 10  # 10ノード処理ごとに保存
     
     # 既存データがあるディメンションは幅方向展開をスキップ
@@ -296,75 +537,90 @@ def main(args):
     if args.dataset == 'casestudy':
         skip_depth_expansion_dims = {'会社規模'}
 
-    while queue:
-        curr_node = queue.popleft()
-        iteration_count += 1
-        print(f'VISITING {curr_node.label} ({curr_node.dimension}) AT LEVEL {curr_node.level}. WE HAVE {len(queue)} NODES LEFT IN THE QUEUE!')
-        
-        if len(curr_node.children) > 0:
-            if curr_node.id in visited:
-                continue
-            visited.add(curr_node.id)
-
-            # classify
-            curr_node.classify_node(args, label2node, visited)
-
-            # sibling expansion if needed (業種と会社規模は条件付きでスキップ)
-            if curr_node.dimension not in skip_width_expansion_dims:
-                new_sibs = expandNodeWidth(args, curr_node, id2node, label2node)
-                print(f'(WIDTH EXPANSION) new children for {curr_node.label} ({curr_node.dimension}) are: {str((new_sibs))}')
-            else:
-                # 未分類論文の数を確認
-                unlabeled_count = sum(1 for idx in curr_node.papers 
-                                     if not any(idx in c.papers for c in curr_node.children.values()))
-                # 未分類論文が多い場合のみ幅方向展開を実行
-                if unlabeled_count > args.max_density:
-                    print(f'(WIDTH EXPANSION) {curr_node.label} ({curr_node.dimension}) has {unlabeled_count} unlabeled papers, executing width expansion despite skip flag')
-                    new_sibs = expandNodeWidth(args, curr_node, id2node, label2node)
-                else:
-                    new_sibs = []
-                    print(f'(WIDTH EXPANSION SKIPPED) {curr_node.label} ({curr_node.dimension}) has {unlabeled_count} unlabeled papers (threshold: {args.max_density}), skipping width expansion')
+    try:
+        while queue:
+            curr_node = queue.popleft()
+            iteration_count += 1
+            print(f'VISITING {curr_node.label} ({curr_node.dimension}) AT LEVEL {curr_node.level}. WE HAVE {len(queue)} NODES LEFT IN THE QUEUE!')
             
-            # 業務課題などの特定ディメンションでは、未分類論文が少なくてもLLMに判断を委ねる
-            llm_judgment_dims = {'業務課題'}  # LLM判断を適用するディメンション
-            if curr_node.dimension in llm_judgment_dims and len(new_sibs) == 0:
-                # 未分類論文が少ない場合でも、LLMに判断を委ねる
-                should_expand, reasoning = shouldExpandWidthWithLLM(args, curr_node, id2node, label2node)
-                if should_expand:
-                    print(f'(WIDTH EXPANSION - LLM JUDGMENT) {curr_node.label} ({curr_node.dimension}): {reasoning}')
+            if len(curr_node.children) > 0:
+                if curr_node.id in visited:
+                    continue
+                visited.add(curr_node.id)
+
+                # classify
+                curr_node.classify_node(args, label2node, visited)
+
+                # sibling expansion if needed (業種と会社規模は条件付きでスキップ)
+                if curr_node.dimension not in skip_width_expansion_dims:
                     new_sibs = expandNodeWidth(args, curr_node, id2node, label2node)
                     print(f'(WIDTH EXPANSION) new children for {curr_node.label} ({curr_node.dimension}) are: {str((new_sibs))}')
                 else:
-                    print(f'(WIDTH EXPANSION SKIPPED - LLM JUDGMENT) {curr_node.label} ({curr_node.dimension}): {reasoning}')
+                    # 未分類論文の数を確認
+                    unlabeled_count = sum(1 for idx in curr_node.papers 
+                                         if not any(idx in c.papers for c in curr_node.children.values()))
+                    # 未分類論文が多い場合のみ幅方向展開を実行
+                    if unlabeled_count > args.max_density:
+                        print(f'(WIDTH EXPANSION) {curr_node.label} ({curr_node.dimension}) has {unlabeled_count} unlabeled papers, executing width expansion despite skip flag')
+                        new_sibs = expandNodeWidth(args, curr_node, id2node, label2node)
+                    else:
+                        new_sibs = []
+                        print(f'(WIDTH EXPANSION SKIPPED) {curr_node.label} ({curr_node.dimension}) has {unlabeled_count} unlabeled papers (threshold: {args.max_density}), skipping width expansion')
+                
+                # 業務課題などの特定ディメンションでは、未分類論文が少なくてもLLMに判断を委ねる
+                llm_judgment_dims = {'業務課題'}  # LLM判断を適用するディメンション
+                if curr_node.dimension in llm_judgment_dims and len(new_sibs) == 0:
+                    # 未分類論文が少ない場合でも、LLMに判断を委ねる
+                    should_expand, reasoning = shouldExpandWidthWithLLM(args, curr_node, id2node, label2node)
+                    if should_expand:
+                        print(f'(WIDTH EXPANSION - LLM JUDGMENT) {curr_node.label} ({curr_node.dimension}): {reasoning}')
+                        new_sibs = expandNodeWidth(args, curr_node, id2node, label2node)
+                        print(f'(WIDTH EXPANSION) new children for {curr_node.label} ({curr_node.dimension}) are: {str((new_sibs))}')
+                    else:
+                        print(f'(WIDTH EXPANSION SKIPPED - LLM JUDGMENT) {curr_node.label} ({curr_node.dimension}): {reasoning}')
 
-            # re-classify and re-do process if necessary
-            if len(new_sibs) > 0:
-                curr_node.classify_node(args, label2node, visited)
-            
-            # add children to queue if constraints are met
-            for child_label, child_node in curr_node.children.items():
-                c_papers = label2node[child_label + f"_{curr_node.dimension}"].papers
-                if (child_node.level < args.max_depth) and (len(c_papers) > args.max_density):
-                    queue.append(child_node)
-        else:
-            # 会社規模の場合は深さ方向展開をスキップ
-            if curr_node.dimension in skip_depth_expansion_dims:
-                print(f'(DEPTH EXPANSION SKIPPED) {curr_node.label} ({curr_node.dimension}) - skipping depth expansion')
-                continue
-            # no children -> perform depth expansion
-            new_children, success = expandNodeDepth(args, curr_node, id2node, label2node)
-            # args.llm = 'vllm'  # GPTを使用する場合はコメントアウト
-            print(f'(DEPTH EXPANSION) new {len(new_children)} children for {curr_node.label} ({curr_node.dimension}) are: {str((new_children))}')
-            if (len(new_children) > 0) and success:
-                queue.append(curr_node)
+                # re-classify and re-do process if necessary
+                if len(new_sibs) > 0:
+                    curr_node.classify_node(args, label2node, visited)
+                
+                # add children to queue if constraints are met
+                for child_label, child_node in curr_node.children.items():
+                    c_papers = label2node[child_label + f"_{curr_node.dimension}"].papers
+                    if (child_node.level < args.max_depth) and (len(c_papers) > args.max_density):
+                        queue.append(child_node)
+            else:
+                # 会社規模の場合は深さ方向展開をスキップ
+                if curr_node.dimension in skip_depth_expansion_dims:
+                    print(f'(DEPTH EXPANSION SKIPPED) {curr_node.label} ({curr_node.dimension}) - skipping depth expansion')
+                    continue
+                # no children -> perform depth expansion
+                new_children, success = expandNodeDepth(args, curr_node, id2node, label2node)
+                # args.llm = 'vllm'  # GPTを使用する場合はコメントアウト
+                print(f'(DEPTH EXPANSION) new {len(new_children)} children for {curr_node.label} ({curr_node.dimension}) are: {str((new_children))}')
+                if (len(new_children) > 0) and success:
+                    queue.append(curr_node)
         
-        # 途中経過を定期的に保存
-        if iteration_count % save_interval == 0:
-            print(f"######## CHECKPOINT: Saving intermediate taxonomy at iteration {iteration_count} ########")
-            for dim in args.dimensions:
-                with open(f'{args.data_dir}/intermediate_taxo_{dim}_iter{iteration_count}.txt', 'w', encoding='utf-8') as f:
-                    with redirect_stdout(f):
-                        roots[dim].display(0, indent_multiplier=5)
+            # 途中経過を定期的に保存
+            if iteration_count % save_interval == 0:
+                print(f"######## CHECKPOINT: Saving intermediate taxonomy at iteration {iteration_count} ########")
+                for dim in args.dimensions:
+                    with open(f'{args.data_dir}/intermediate_taxo_{dim}_iter{iteration_count}.txt', 'w', encoding='utf-8') as f:
+                        with redirect_stdout(f):
+                            roots[dim].display(0, indent_multiplier=5)
+                # チェックポイントを保存（再開用）
+                save_checkpoint(args, roots, id2node, label2node, visited, queue, iteration_count)
+    
+    except KeyboardInterrupt:
+        print("\n処理が中断されました。チェックポイントを保存します...")
+        save_checkpoint(args, roots, id2node, label2node, visited, queue, iteration_count)
+        print("チェックポイントを保存しました。--resumeオプションで再開できます。")
+        raise
+    except Exception as e:
+        print(f"\nエラーが発生しました: {e}")
+        print("チェックポイントを保存します...")
+        save_checkpoint(args, roots, id2node, label2node, visited, queue, iteration_count)
+        print("チェックポイントを保存しました。--resumeオプションで再開できます。")
+        raise
     
     print("######## STEP 5: SAVE THE TAXONOMY ########")
     for dim in args.dimensions:
@@ -374,6 +630,12 @@ def main(args):
 
         with open(f'{args.data_dir}/final_taxo_{dim}.json', 'w', encoding='utf-8') as f:
             json.dump(taxo_dict, f, ensure_ascii=False, indent=4)
+    
+    # 処理完了時はチェックポイントを削除
+    checkpoint_file = f'{args.data_dir}/checkpoint.json'
+    if os.path.exists(checkpoint_file):
+        os.remove(checkpoint_file)
+        print(f"処理が完了したため、チェックポイントを削除しました: {checkpoint_file}")
 
 
 
@@ -384,7 +646,7 @@ if __name__ == "__main__":
     parser.add_argument('--dataset', type=str, default='casestudy')
     parser.add_argument('--llm', type=str, default='gpt', choices=['gpt', 'vllm', 'local'], 
                         help='使用するLLM: gpt (OpenAI API), vllm (vLLM), local (LM Studio/Ollama)')
-    parser.add_argument('--max_depth', type=int, default=2)
+    parser.add_argument('--max_depth', type=int, default=4)
     parser.add_argument('--init_levels', type=int, default=1)
     parser.add_argument('--max_density', type=int, default=40)
     parser.add_argument('--local_api_url', type=str, default=None,
@@ -393,6 +655,8 @@ if __name__ == "__main__":
                         help='ローカルAPIのキー (LM Studio/Ollamaでは任意の文字列でOK)')
     parser.add_argument('--local_model_name', type=str, default=None,
                         help='ローカルモデル名 (例: deepseek-r1-distill-llama-70b-iq3-xs)')
+    parser.add_argument('--resume', action='store_true',
+                        help='チェックポイントから再開する')
     args = parser.parse_args()
 
     # casestudyの場合はビジネス向けディメンションを使用

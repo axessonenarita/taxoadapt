@@ -74,9 +74,20 @@ def expandNodeWidth(args, node, id2node, label2node):
     
     exp_prompts = [constructPrompt(args, width_system_instruction, width_main_prompt(paper, node, ancestors)) for paper in unlabeled_papers.values()]
     exp_outputs = promptLLM(args=args, prompts=exp_prompts, schema=WidthExpansionSchema, max_new_tokens=300, json_mode=True, temperature=0.6, top_p=0.99)
-    exp_outputs = [json.loads(clean_json_string(c))['new_subtopic_label'].replace(' ', '_').lower() 
-                   if "```" in c else json.loads(c.strip())['new_subtopic_label'].replace(' ', '_').lower() 
-                   for c in exp_outputs]
+    # 空のJSONオブジェクトやnew_subtopic_labelキーが存在しない場合を処理
+    parsed_outputs = []
+    for c in exp_outputs:
+        try:
+            if "```" in c:
+                parsed = json.loads(clean_json_string(c))
+            else:
+                parsed = json.loads(c.strip())
+            if parsed and 'new_subtopic_label' in parsed:
+                parsed_outputs.append(parsed['new_subtopic_label'].replace(' ', '_').lower())
+        except (json.JSONDecodeError, KeyError):
+            # 空のJSONオブジェクトやキーが存在しない場合はスキップ
+            continue
+    exp_outputs = parsed_outputs
 
     exp_outputs = [w for w in exp_outputs if w + f"_{node.dimension}" not in label2node]
     if len(exp_outputs) == 0:
@@ -124,7 +135,10 @@ def expandNodeWidth(args, node, id2node, label2node):
         sibling_label = subtopic_cluster[f"label"]
         sibling_desc = subtopic_cluster[f"description"]
         mod_key = sibling_label.replace(' ', '_').lower()
-        mod_full_key = sibling_label.replace(' ', '_').lower() + f"_{dim}"
+        # LLMが返すラベルに含まれる可能性のある_{dim}サフィックスを削除
+        if mod_key.endswith(f"_{dim}"):
+            mod_key = mod_key[:-len(f"_{dim}")]
+        mod_full_key = mod_key + f"_{dim}"
         
         if mod_full_key not in label2node:
             child_node = Node(
@@ -171,9 +185,20 @@ def expandNodeDepth(args, node, id2node, label2node):
                    for paper in node.papers.values()]
     subtopic_outputs = promptLLM(args=args, prompts=subtopic_prompts, schema=DepthExpansionSchema, max_new_tokens=300, json_mode=True, temperature=0.6, top_p=0.99)
 
-    subtopic_outputs = [json.loads(clean_json_string(c))['new_subtopic_label'].replace(' ', '_').lower() 
-                   if "```" in c else json.loads(c.strip())['new_subtopic_label'].replace(' ', '_').lower() 
-                   for c in subtopic_outputs]
+    # 空のJSONオブジェクトやnew_subtopic_labelキーが存在しない場合を処理
+    parsed_subtopic_outputs = []
+    for c in subtopic_outputs:
+        try:
+            if "```" in c:
+                parsed = json.loads(clean_json_string(c))
+            else:
+                parsed = json.loads(c.strip())
+            if parsed and 'new_subtopic_label' in parsed:
+                parsed_subtopic_outputs.append(parsed['new_subtopic_label'].replace(' ', '_').lower())
+        except (json.JSONDecodeError, KeyError):
+            # 空のJSONオブジェクトやキーが存在しない場合はスキップ
+            continue
+    subtopic_outputs = parsed_subtopic_outputs
     
     subtopic_outputs = [w for w in subtopic_outputs if w + f"_{node.dimension}" not in label2node]
 
@@ -218,6 +243,9 @@ def expandNodeDepth(args, node, id2node, label2node):
 
     for subtopic_cluster in cluster_outputs:
         child_label = subtopic_cluster[f"label"].replace(' ', '_').lower()
+        # LLMが返すラベルに含まれる可能性のある_{dim}サフィックスを削除
+        if child_label.endswith(f"_{dim}"):
+            child_label = child_label[:-len(f"_{dim}")]
         child_desc = subtopic_cluster[f"description"]
         child_full_label = child_label + f"_{dim}"
 

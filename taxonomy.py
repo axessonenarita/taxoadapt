@@ -166,20 +166,38 @@ class Node:
 
         for (paper_id, paper), out_labels in zip(self.papers.items(), output_dict):
             classified_to_child = False
+            # 空のJSONオブジェクトやclass_labelsキーが存在しない場合の処理
+            if not out_labels or 'class_labels' not in out_labels:
+                class_map['unlabeled'] += 1
+                continue
             if (len(out_labels['class_labels']) == 0) or ("None" in out_labels['class_labels']):
                 class_map['unlabeled'] += 1
                 continue
             for label in out_labels['class_labels']:
-                full_label = label + f'_{self.dimension}'
+                # LLMが返すラベルを正規化（expandNodeWidthと同様の処理）
+                normalized_label = label.replace(' ', '_').lower()
+                # 既にサフィックスが含まれている場合は削除
+                if normalized_label.endswith(f'_{self.dimension}'):
+                    normalized_label = normalized_label[:-len(f'_{self.dimension}')]
+                full_label = normalized_label + f'_{self.dimension}'
                 if "None" in label:
                     class_map['unlabeled'] += 1
                     continue
-                elif (full_label in label2node) and (label in class_options):
-                    label2node[full_label].papers[paper_id] = paper
-                    class_map[label] += 1
-                    paper.labels[self.dimension].append(label)
-                    classified_to_child = True
+                # 正規化されたラベルでlabel2nodeを検索
+                elif full_label in label2node:
+                    # class_optionsとのマッチング（正規化されたラベルで比較）
+                    if normalized_label in class_options:
+                        label2node[full_label].papers[paper_id] = paper
+                        class_map[normalized_label] += 1
+                        paper.labels[self.dimension].append(normalized_label)
+                        classified_to_child = True
+                    else:
+                        # 正規化されたラベルがclass_optionsにない場合、ログを出力
+                        print(f'警告: LLMが返したラベル "{label}" (正規化後: "{normalized_label}") がclass_optionsに存在しません。class_options: {class_options}')
+                        class_map['unlabeled'] += 1
                 else:
+                    # label2nodeに存在しない場合、ログを出力
+                    print(f'警告: LLMが返したラベル "{label}" (full_label: "{full_label}") がlabel2nodeに存在しません。')
                     class_map['unlabeled'] += 1
             
             # 子ノードに分類された論文は親ノードから削除
