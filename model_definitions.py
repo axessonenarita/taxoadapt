@@ -185,11 +185,80 @@ def initializeLLM(args):
 	
 	return args
 
-async def _make_api_request(async_client, create_params, idx, total, api_key_index=None):
+async def _make_api_request(async_client, create_params, idx, total, api_key_index=None, tpm_tracker=None):
 	"""単一のAPIリクエストを非同期で実行"""
 	try:
 		response = await async_client.chat.completions.create(**create_params)
-		return (idx, response.choices[0].message.content, None, api_key_index, None)
+		
+		# レスポンスヘッダーからTPM情報を取得
+		tpm_info = None
+		headers = {}
+		# OpenAI SDKのレスポンスからヘッダーを取得
+		# レスポンスオブジェクトの構造を確認
+		if hasattr(response, '_response'):
+			# httpx.Responseオブジェクトの場合
+			raw_response = response._response
+			if hasattr(raw_response, 'headers'):
+				headers = raw_response.headers
+		elif hasattr(response, 'headers'):
+			headers = response.headers
+		elif hasattr(response, '_headers'):
+			headers = response._headers
+		
+		# TPM情報を抽出
+		if headers:
+			# ヘッダーキーを複数の形式で試行（大文字小文字を考慮）
+			remaining_tokens = (headers.get('x-ratelimit-remaining-tokens') or 
+			                   headers.get('X-RateLimit-Remaining-Tokens') or
+			                   headers.get('X-RateLimit-Remaining-tokens'))
+			reset_tokens = (headers.get('x-ratelimit-reset-tokens') or 
+			               headers.get('X-RateLimit-Reset-Tokens') or
+			               headers.get('X-RateLimit-Reset-tokens'))
+			limit_tokens = (headers.get('x-ratelimit-limit-tokens') or 
+			               headers.get('X-RateLimit-Limit-Tokens') or
+			               headers.get('X-RateLimit-Limit-tokens'))
+			
+			# remaining_tokensが取得できた場合、またはlimit_tokensが取得できた場合にTPM情報を更新
+			if (remaining_tokens is not None or limit_tokens is not None) and tpm_tracker is not None:
+				try:
+					remaining = int(remaining_tokens) if remaining_tokens else None
+					limit = int(limit_tokens) if limit_tokens else None
+					# reset_tokensは "6m0s" のような形式の可能性がある
+					reset_time = None
+					if reset_tokens:
+						# "6m0s" 形式を秒に変換
+						import re
+						match = re.match(r'(\d+)m(\d+)s', reset_tokens)
+						if match:
+							reset_time = int(match.group(1)) * 60 + int(match.group(2))
+						else:
+							# 秒数のみの場合
+							try:
+								reset_time = int(reset_tokens)
+							except:
+								pass
+					
+					tpm_info = {
+						'remaining': remaining,
+						'limit': limit,
+						'reset_time': reset_time,
+						'usage_percent': (1.0 - (remaining / limit)) * 100 if limit and remaining is not None else None
+					}
+					
+					# TPMトラッカーを更新
+					if api_key_index is not None:
+						tpm_tracker[api_key_index] = {
+							'remaining': remaining,
+							'limit': limit,
+							'reset_time': reset_time,
+							'last_update': time.time(),
+							'usage_percent': tpm_info['usage_percent']
+						}
+				except (ValueError, TypeError) as e:
+					# ヘッダーの解析に失敗した場合は無視
+					pass
+		
+		return (idx, response.choices[0].message.content, None, api_key_index, None, tpm_info)
 	except Exception as e:
 		# レート制限エラーの場合、待機時間を抽出
 		wait_time = None
@@ -200,7 +269,7 @@ async def _make_api_request(async_client, create_params, idx, total, api_key_ind
 			match = re.search(r'try again in ([\d.]+)s', error_message, re.IGNORECASE)
 			if match:
 				wait_time = float(match.group(1))
-		return (idx, None, e, api_key_index, wait_time)
+		return (idx, None, e, api_key_index, wait_time, None)
 
 async def promptGPT_parallel_async(args, prompts, api_keys, model_name, schema, max_new_tokens, json_mode, temperature, top_p):
 	"""複数のAPIキーを使って並列リクエストを送信（非同期版）"""
@@ -265,12 +334,42 @@ async def promptGPT_parallel_async(args, prompts, api_keys, model_name, schema, 
 	last_request_time = {i: 0.0 for i in range(len(api_keys))}
 	# 各APIキーごとのロック（同じAPIキーへの同時リクエストを防ぐ）
 	api_key_locks = {i: asyncio.Lock() for i in range(len(api_keys))}
+	# TPM使用量を追跡（各APIキーごと）
+	tpm_tracker = {i: {
+		'remaining': None,
+		'limit': None,
+		'reset_time': None,
+		'last_update': 0.0,
+		'usage_percent': None
+	} for i in range(len(api_keys))}
+	
+	# TPM使用率の閾値（デフォルト80%、環境変数で設定可能）
+	tpm_threshold = float(os.getenv('OPENAI_TPM_THRESHOLD', '80.0'))
 	
 	async def process_with_semaphore(idx, create_params, api_key_idx):
 		"""セマフォを使って同時実行数を制限しながらリクエストを実行"""
 		async with semaphore:
 			# 同じAPIキーへの同時リクエストを防ぐ
 			async with api_key_locks[api_key_idx]:
+				# TPM使用量をチェックして、閾値を超えている場合は待機
+				tpm_info = tpm_tracker[api_key_idx]
+				if tpm_info['usage_percent'] is not None and tpm_info['usage_percent'] >= tpm_threshold:
+					# TPM使用率が閾値を超えている場合
+					if tpm_info['reset_time'] is not None:
+						# リセット時間を計算
+						time_until_reset = tpm_info['reset_time']
+						if time_until_reset > 0:
+							print(f"  ⏸ TPM使用率{tpm_info['usage_percent']:.1f}%のため、APIキー{api_key_idx + 1}を{time_until_reset}秒待機...", end='\r')
+							await asyncio.sleep(time_until_reset + 1)  # 少し余裕を持たせる
+							# TPM情報をリセット
+							tpm_tracker[api_key_idx] = {
+								'remaining': None,
+								'limit': None,
+								'reset_time': None,
+								'last_update': time.time(),
+								'usage_percent': None
+							}
+				
 				# 最後のリクエストからの経過時間を確認
 				elapsed_since_last = time.time() - last_request_time[api_key_idx]
 				if elapsed_since_last < request_interval:
@@ -280,7 +379,7 @@ async def promptGPT_parallel_async(args, prompts, api_keys, model_name, schema, 
 				
 				# リクエストを実行
 				async_client = async_clients[api_key_idx]
-				result = await _make_api_request(async_client, create_params, idx, len(prompts), api_key_idx + 1)
+				result = await _make_api_request(async_client, create_params, idx, len(prompts), api_key_idx, tpm_tracker)
 				
 				# 最後のリクエスト時刻を更新
 				last_request_time[api_key_idx] = time.time()
@@ -289,36 +388,61 @@ async def promptGPT_parallel_async(args, prompts, api_keys, model_name, schema, 
 	
 	# すべてのリクエストをタスクとして作成（セマフォで制限される）
 	tasks = []
+	task_map = {}  # タスクとインデックスのマッピング
 	for idx, create_params in enumerate(create_params_list):
 		api_key_idx = next(client_cycle)  # ラウンドロビンでAPIキーを選択
-		tasks.append(process_with_semaphore(idx, create_params, api_key_idx))
+		task = process_with_semaphore(idx, create_params, api_key_idx)
+		tasks.append(task)
+		task_map[task] = idx
 	
-	# タスクを順序を保証して処理（gatherを使用して順序を保証）
 	# 進捗表示のため、成功したタスクのみを追跡
 	success_tasks = set()
+	completed_count = 0
 	
-	# タスクを実行
-	results_list = await asyncio.gather(*tasks, return_exceptions=True)
-	
-	# 結果をインデックス順に処理（進捗表示付き）
-	for idx, result in enumerate(results_list):
-		if isinstance(result, Exception):
-			raise result
-		idx_result, content, error, api_key_idx, wait_time = result
-		results_dict[idx_result] = (idx_result, content, error, api_key_idx, wait_time)
-		
-		# 成功したタスクのみをカウント
-		if error is None:
-			success_tasks.add(idx_result)
-			success_count = len(success_tasks)
+	# タスクを完了順に処理（リアルタイムで進捗を表示）
+	# as_completedを使用して、完了したタスクから順に処理
+		for coro in asyncio.as_completed(tasks):
+		try:
+			result = await coro
+			if isinstance(result, Exception):
+				raise result
+			# tpm_infoが追加されたので、6要素または5要素のタプルに対応
+			if len(result) == 6:
+				idx_result, content, error, api_key_idx, wait_time, tpm_info = result
+			else:
+				idx_result, content, error, api_key_idx, wait_time = result
+				tpm_info = None
+			
+			results_dict[idx_result] = (idx_result, content, error, api_key_idx, wait_time)
+			completed_count += 1
+			
+			# TPM情報を表示（成功時のみ）
+			tpm_status = ""
+			if tpm_info and tpm_info.get('usage_percent') is not None:
+				tpm_status = f" | TPM使用率: {tpm_info['usage_percent']:.1f}%"
+			
+			# 成功したタスクのみをカウント
+			if error is None:
+				success_tasks.add(idx_result)
+				success_count = len(success_tasks)
+				elapsed = time.time() - start_time
+				rate = success_count / elapsed if elapsed > 0 else 0
+				remaining = len(prompts) - success_count
+				eta = remaining / rate if rate > 0 else 0
+				print(f"  ✓ [{success_count:4d}/{len(prompts)}] 成功 | 完了: {completed_count}/{len(prompts)} ({elapsed:.1f}秒経過, 残り約{eta:.1f}秒){tpm_status}", end='\r')
+			elif isinstance(error, openai.RateLimitError):
+				# レート制限エラーを記録
+				rate_limit_errors.append((idx_result, api_key_idx, wait_time, error))
+				elapsed = time.time() - start_time
+				print(f"  ⚠ [{completed_count:4d}/{len(prompts)}] レート制限エラー | 成功: {len(success_tasks)}件 ({elapsed:.1f}秒経過)", end='\r')
+			else:
+				elapsed = time.time() - start_time
+				print(f"  ❌ [{completed_count:4d}/{len(prompts)}] エラー | 成功: {len(success_tasks)}件 ({elapsed:.1f}秒経過)", end='\r')
+		except Exception as e:
+			completed_count += 1
 			elapsed = time.time() - start_time
-			rate = success_count / elapsed if elapsed > 0 else 0
-			remaining = len(prompts) - success_count
-			eta = remaining / rate if rate > 0 else 0
-			print(f"  ✓ [{success_count:4d}/{len(prompts)}] 成功 ({elapsed:.1f}秒経過, 残り約{eta:.1f}秒)", end='\r')
-		elif isinstance(error, openai.RateLimitError):
-			# レート制限エラーを記録
-			rate_limit_errors.append((idx_result, api_key_idx, wait_time, error))
+			print(f"  ❌ [{completed_count:4d}/{len(prompts)}] 例外発生: {str(e)[:50]} ({elapsed:.1f}秒経過)", end='\r')
+			raise
 	
 	print()  # 改行
 	
@@ -331,44 +455,111 @@ async def promptGPT_parallel_async(args, prompts, api_keys, model_name, schema, 
 		retry_attempt += 1
 		print(f"\n⚠️  レート制限エラーが{len(failed_requests)}件発生しました（リトライ {retry_attempt}/{max_retries}）")
 		
-		# 最大の待機時間を取得
-		max_wait_time = max([w for _, _, w, _ in failed_requests if w is not None], default=5.0)
-		if max_wait_time:
-			print(f"   ⏳ {max_wait_time:.1f}秒待機してからリトライします...")
-			await asyncio.sleep(max_wait_time + 1)  # 少し余裕を持たせる
+		# エラーメッセージからTPM制限かRPM制限かを判定し、適切な待機時間を計算
+		import re
+		is_tpm_limit = False
+		max_wait_time = 5.0  # デフォルトの待機時間
+		
+		# 失敗したAPIキーのインデックスを記録（リトライ時に避けるため）
+		failed_api_key_indices = set()
+		
+		for _, api_key_idx, _, error in failed_requests:
+			failed_api_key_indices.add(api_key_idx)
+			if error:
+				error_msg = str(error).lower()
+				# TPM制限の場合は1分間待つ必要がある
+				if 'tokens per min' in error_msg or 'tpm' in error_msg:
+					is_tpm_limit = True
+					# エラーメッセージから待機時間を抽出
+					match = re.search(r'try again in ([\d.]+)s', str(error), re.IGNORECASE)
+					if match:
+						extracted_wait = float(match.group(1))
+						# TPM制限の場合は60秒と抽出した時間のうち大きい方を待つ
+						max_wait_time = max(max_wait_time, extracted_wait, 60.0)
+					else:
+						max_wait_time = max(max_wait_time, 60.0)
+				else:
+					# RPM制限の場合はエラーメッセージから抽出した時間を待つ
+					match = re.search(r'try again in ([\d.]+)s', str(error), re.IGNORECASE)
+					if match:
+						max_wait_time = max(max_wait_time, float(match.group(1)))
+		
+		limit_type = "TPM" if is_tpm_limit else "RPM"
+		print(f"   ⏳ {limit_type}制限のため {max_wait_time:.1f}秒待機してからリトライします...")
+		await asyncio.sleep(max_wait_time + 2)  # 少し余裕を持たせる
+		
+		# 待機後に各APIキーの最後のリクエスト時刻をリセット
+		# （十分な時間を待ったので、次のリクエストは即座に送れるようにする）
+		current_time = time.time()
+		for i in range(len(api_keys)):
+			last_request_time[i] = current_time - request_interval  # インターバル分だけ過去に設定
 		
 		# 失敗したリクエストをリトライ
 		print(f"   🔄 {len(failed_requests)}件のリクエストをリトライします...")
 		retry_tasks = []
 		for idx, api_key_idx, _, error in failed_requests:
-			# 別のAPIキーでリトライ（ラウンドロビン）
-			retry_key_idx = next(client_cycle)
+			# 失敗したAPIキーを避けて、別のAPIキーでリトライ
+			# 利用可能なAPIキーを探す（失敗したAPIキー以外）
+			retry_key_idx = None
+			if len(api_keys) > 1:
+				# 複数のAPIキーがある場合、失敗したAPIキー以外を選ぶ
+				for _ in range(len(api_keys)):
+					candidate = next(client_cycle)
+					if candidate not in failed_api_key_indices:
+						retry_key_idx = candidate
+						break
+			# すべてのAPIキーが失敗している場合、またはAPIキーが1つだけの場合は、最初のAPIキーを使用
+			if retry_key_idx is None:
+				retry_key_idx = next(client_cycle)
+			
 			retry_params = create_params_list[idx]
 			# セマフォを使って同時実行数を制限
 			retry_tasks.append(process_with_semaphore(idx, retry_params, retry_key_idx))
 		
-		# リトライを並列実行（セマフォで制限される、順序を保証）
-		retry_results = await asyncio.gather(*retry_tasks, return_exceptions=True)
-		
-		# リトライ結果を処理
-		failed_requests = []  # 次のリトライ用にリセット
+		# リトライを並列実行（セマフォで制限される、完了順に処理）
 		retry_success_count = 0
-		for retry_result in retry_results:
-			if isinstance(retry_result, Exception):
-				raise retry_result
-			idx, content, error, api_key_idx, wait_time = retry_result
-			if error is None:
-				results_dict[idx] = (idx, content, None, api_key_idx, wait_time)
-				retry_success_count += 1
-				print(f"  ✓ リトライ成功 [{retry_success_count}/{len(retry_tasks)}] (件数 {idx+1}, APIキー{api_key_idx})", end='\r')
-			else:
-				# リトライも失敗した場合は次のリトライに追加
-				if isinstance(error, openai.RateLimitError):
-					failed_requests.append((idx, api_key_idx, wait_time, error))
+		retry_completed_count = 0
+		failed_requests = []  # 次のリトライ用にリセット
+		
+		# リトライ結果を完了順に処理（リアルタイムで進捗を表示）
+		for coro in asyncio.as_completed(retry_tasks):
+			try:
+				retry_result = await coro
+				if isinstance(retry_result, Exception):
+					raise retry_result
+				# tpm_infoが追加されたので、6要素または5要素のタプルに対応
+				if len(retry_result) == 6:
+					idx, content, error, api_key_idx, wait_time, tpm_info = retry_result
 				else:
-					# レート制限以外のエラーは即座に例外を発生
-					print(f"\n❌ リトライ失敗: APIエラー (件数 {idx+1}, APIキー {api_key_idx}): {error}")
-					raise error
+					idx, content, error, api_key_idx, wait_time = retry_result
+					tpm_info = None
+				retry_completed_count += 1
+				
+				# TPM情報を表示（成功時のみ）
+				tpm_status = ""
+				if tpm_info and tpm_info.get('usage_percent') is not None:
+					tpm_status = f" | TPM使用率: {tpm_info['usage_percent']:.1f}%"
+				
+				if error is None:
+					results_dict[idx] = (idx, content, None, api_key_idx, wait_time)
+					retry_success_count += 1
+					elapsed = time.time() - start_time
+					print(f"  ✓ リトライ成功 [{retry_success_count}/{len(retry_tasks)}] | 完了: {retry_completed_count}/{len(retry_tasks)} (件数 {idx+1}, APIキー{api_key_idx + 1}{tpm_status}, {elapsed:.1f}秒経過)", end='\r')
+				else:
+					# リトライも失敗した場合は次のリトライに追加
+					if isinstance(error, openai.RateLimitError):
+						failed_requests.append((idx, api_key_idx, wait_time, error))
+						elapsed = time.time() - start_time
+						print(f"  ⚠ リトライ失敗 [{retry_completed_count}/{len(retry_tasks)}] レート制限 | 成功: {retry_success_count}件 (件数 {idx+1}, {elapsed:.1f}秒経過)", end='\r')
+					else:
+						# レート制限以外のエラーは即座に例外を発生
+						print(f"\n❌ リトライ失敗: APIエラー (件数 {idx+1}, APIキー {api_key_idx + 1}): {error}")
+						raise error
+			except Exception as e:
+				retry_completed_count += 1
+				elapsed = time.time() - start_time
+				print(f"  ❌ リトライ例外 [{retry_completed_count}/{len(retry_tasks)}]: {str(e)[:50]} ({elapsed:.1f}秒経過)", end='\r')
+				raise
 		print()  # 改行
 		
 		# すべて成功した場合はループを抜ける
@@ -387,7 +578,7 @@ async def promptGPT_parallel_async(args, prompts, api_keys, model_name, schema, 
 	# 結果を処理
 	success_count = 0
 	error_count = 0
-	api_key_usage = {i+1: 0 for i in range(len(api_keys))}  # 各APIキーの使用回数を記録
+	api_key_usage = {i: 0 for i in range(len(api_keys))}  # 各APIキーの使用回数を記録（インデックスは0ベース）
 	
 	for result in results:
 		if result is None:
@@ -429,7 +620,7 @@ async def promptGPT_parallel_async(args, prompts, api_keys, model_name, schema, 
 	print(f"\n📊 APIキー使用状況:")
 	for key_idx, count in sorted(api_key_usage.items()):
 		percentage = (count / success_count * 100) if success_count > 0 else 0
-		print(f"   - APIキー {key_idx}: {count}件 ({percentage:.1f}%)")
+		print(f"   - APIキー {key_idx + 1}: {count}件 ({percentage:.1f}%)")
 	print(f"{'='*60}\n")
 	
 	# クライアントをクローズ

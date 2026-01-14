@@ -602,11 +602,7 @@ def main(args):
         
             # 途中経過を定期的に保存
             if iteration_count % save_interval == 0:
-                print(f"######## CHECKPOINT: Saving intermediate taxonomy at iteration {iteration_count} ########")
-                for dim in args.dimensions:
-                    with open(f'{args.data_dir}/intermediate_taxo_{dim}_iter{iteration_count}.txt', 'w', encoding='utf-8') as f:
-                        with redirect_stdout(f):
-                            roots[dim].display(0, indent_multiplier=5)
+                print(f"######## CHECKPOINT: Saving checkpoint at iteration {iteration_count} ########")
                 # チェックポイントを保存（再開用）
                 save_checkpoint(args, roots, id2node, label2node, visited, queue, iteration_count)
     
